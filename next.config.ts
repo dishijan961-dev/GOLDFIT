@@ -1,9 +1,3 @@
 import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
-  /* config options here */
-  cacheComponents: true,
-  partialPrefetching: true,
-};
-
+const nextConfig: NextConfig = { allowedDevOrigins: ["*.trycloudflare.com"] };
 export default nextConfig;
