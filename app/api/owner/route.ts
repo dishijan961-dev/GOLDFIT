@@ -9,7 +9,7 @@ const bad = (error: string, status = 400) => NextResponse.json({ error }, { stat
 const ok = () => NextResponse.json({ ok: true });
 const SETTING_KEYS = ["store_enabled", "theme", "season", "absent_days", "auto_block", "checkin_hours"];
 
-export async function GET() {
+export async function GET(req: Request) {
   const u = await getUser();
   if (!u || u.role === "client") return bad("Ruxsat yo'q", 403);
   const start = `${tzToday()}T00:00:00+05:00`;
@@ -22,6 +22,7 @@ export async function GET() {
   const strip = (x: any) => { const { pass_hash, ...r } = x; return r; };
   return NextResponse.json({
     clients: (c.data || []).map(strip), products: p.data || [], visits: v.data || [], botUsers: b.data || [],
+    displayUrl: u.role === "owner" && process.env.DISPLAY_KEY ? `${appUrl(req)}/display?key=${process.env.DISPLAY_KEY}` : null,
   });
 }
 

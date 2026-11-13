@@ -80,7 +80,19 @@ function Login({ onDone }) {
 }
 
 function Tabs({ tabs, tab, setTab }) {
-  return <div className="tabs">{tabs.map(([k, t]) => <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>{t}</button>)}</div>;
+  return (
+    <div className="tabs">
+      {tabs.map(([k, ic, t]) => (
+        <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>
+          <span className="ti">{ic}</span><span>{t}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function Logout({ reload }) {
+  return <button className="btn ghost sm" onClick={async () => { await api("/api/me", { logout: true }); reload(); }}>Chiqish</button>;
 }
 
 function Notes({ notes }) {
@@ -144,10 +156,10 @@ function Client({ d, reload }) {
         return true;
       })
     : say("Skaner faqat Telegram ichida ishlaydi");
-  const tabs = [["home", "🏠 Bosh"], ...(s.store_enabled ? [["store", "🛒 Do'kon"]] : []), ["notes", "🔔 Xabarlar"]];
+  const tabs = [["home", "🏠", "Bosh"], ...(s.store_enabled ? [["store", "🛒", "Do'kon"]] : []), ["notes", "🔔", "Xabarlar"]];
   return (
     <div className="wrap fade">
-      <div className="row between"><h2 className="gold">GOLD FIT</h2><span className={"tag " + (active ? "on" : "off")}>{active ? "Faol" : "To'lov kerak"}</span></div>
+      <div className="row between" style={{ marginBottom: 12 }}><h2 className="gold" style={{ margin: 0 }}>GOLD FIT</h2><div className="row"><span className={"tag " + (active ? "on" : "off")}>{active ? "Faol" : "To'lov kerak"}</span><Logout reload={reload} /></div></div>
       {tab === "home" && (
         <>
           <div className="card row">
@@ -210,11 +222,11 @@ function Owner({ d, reload }) {
     );
 
   const absent = o.clients.filter((c) => !c.blocked).map((c) => ({ c, n: since(c.last_visit ?? c.created_at) })).sort((a, b) => b.n - a.n).filter((x) => x.n >= 3);
-  const tabs = [["clients", "👥 Mijozlar"], ["att", "✅ Davomat"], ["shop", "🛒 Do'kon"], ["msg", "🔔 Xabar"], ["set", "⚙️ Sozlama"]];
+  const tabs = [["clients", "👥", "Mijozlar"], ["att", "✅", "Davomat"], ["shop", "🛒", "Do'kon"], ["msg", "🔔", "Xabar"], ["set", "⚙️", "Sozlama"]];
 
   return (
     <div className="wrap fade">
-      <h2 className="gold">GOLD FIT boshqaruv</h2>
+      <div className="row between" style={{ marginBottom: 12 }}><h2 className="gold" style={{ margin: 0 }}>GOLD FIT boshqaruv</h2><Logout reload={reload} /></div>
       {d.user.must_change && <div className="card bad">Xavfsizlik uchun "Sozlama" bo'limida login va parolni o'zgartiring.</div>}
 
       {tab === "clients" && (
@@ -249,6 +261,16 @@ function Owner({ d, reload }) {
 
       {tab === "att" && (
         <>
+          {o.displayUrl && (
+            <div className="card">
+              <b>📺 Zal kirishidagi QR ekran</b>
+              <p className="mut">Zal kirishida planshet yoki telefonda shu sahifani oching. Mijozlar ilovadagi "Zalga kirdim" tugmasi bilan shu QR ni skanerlaydi.</p>
+              <div className="row">
+                <button className="btn" onClick={() => (TG()?.openLink ? TG().openLink(o.displayUrl) : window.open(o.displayUrl, "_blank"))}>QR ekranni ochish</button>
+                <button className="btn ghost" onClick={() => { try { navigator.clipboard?.writeText(o.displayUrl); } catch (e) {} say("Havola nusxalandi"); }}>Havolani nusxalash</button>
+              </div>
+            </div>
+          )}
           <h3>Bugun kelganlar ({o.visits.length})</h3>
           {o.visits.length === 0 && <p className="mut">Bugun hali hech kim kelmagan</p>}
           {o.visits.map((v, i) => <div className="card row between" key={i}><span>{name(v.users)}</span><span className="mut">{new Date(v.at).toLocaleTimeString("uz-UZ", { hour: "2-digit", minute: "2-digit" })}</span></div>)}
