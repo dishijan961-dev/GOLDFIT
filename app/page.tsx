@@ -8,7 +8,7 @@ async function api(url, body) {
   const d = await r.json().catch(() => ({}));
   return { ...d, ok: r.ok };
 }
-const say = (t) => (TG()?.showAlert ? TG().showAlert(t) : alert(t));
+const say = (t) => { try { if (TG()?.initData && TG().showAlert) return TG().showAlert(t); } catch (e) {} alert(t); };
 const today = () => new Date(Date.now() + 5 * 3600e3).toISOString().slice(0, 10);
 const since = (d) => (d ? Math.floor((Date.now() - new Date(d)) / 864e5) : null);
 const name = (u) => [u?.first_name, u?.last_name].filter(Boolean).join(" ") || u?.login;
