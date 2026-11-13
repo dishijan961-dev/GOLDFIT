@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { cookies } from "next/headers";
 import { db } from "./db";
+import { getBotToken } from "./bot";
 
 const SECRET = process.env.APP_SECRET!;
 const hmac = (s: string) => crypto.createHmac("sha256", SECRET).update(s).digest("hex");
@@ -21,12 +22,14 @@ export async function getUser() {
 }
 
 // Telegram Mini App initData imzosini tekshirish
-export function verifyInitData(initData: string) {
+export async function verifyInitData(initData: string) {
+  const token = await getBotToken();
+  if (!token) return null;
   const p = new URLSearchParams(initData);
   const hash = p.get("hash");
   p.delete("hash");
   const str = [...p.entries()].map(([k, v]) => `${k}=${v}`).sort().join("\n");
-  const key = crypto.createHmac("sha256", "WebAppData").update(process.env.BOT_TOKEN!).digest();
+  const key = crypto.createHmac("sha256", "WebAppData").update(token).digest();
   if (crypto.createHmac("sha256", key).update(str).digest("hex") !== hash) return null;
   if (Date.now() / 1000 - +(p.get("auth_date") || 0) > 86400) return null;
   try { return JSON.parse(p.get("user") || ""); } catch { return null; }

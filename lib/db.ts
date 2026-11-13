@@ -15,6 +15,7 @@ export async function getSettings() {
     store_enabled: true, theme: "gold", season: "none",
     absent_days: 10, auto_block: true, checkin_hours: 3,
   };
-  (data || []).forEach((r: any) => (s[r.key] = r.value));
+  // "_" bilan boshlanadigan kalitlar maxfiy (masalan bot tokeni), hech qachon qaytarilmaydi
+  (data || []).forEach((r: any) => { if (!String(r.key).startsWith("_")) s[r.key] = r.value; });
   return s;
 }

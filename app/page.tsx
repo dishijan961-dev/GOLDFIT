@@ -181,7 +181,7 @@ function In({ f, setF, k, ph, type = "text" }) {
 function Owner({ d, reload }) {
   const [tab, setTab] = useState("clients");
   const [o, setO] = useState(null);
-  const [f, setF] = useState({}), [pf, setPf] = useState({}), [nf, setNf] = useState({ target: "all" }), [cf, setCf] = useState({});
+  const [f, setF] = useState({}), [pf, setPf] = useState({}), [nf, setNf] = useState({ target: "all" }), [cf, setCf] = useState({}), [bf, setBf] = useState({});
   const [payDays, setPayDays] = useState(30);
   const s = d.settings, isOwner = d.user.role === "owner";
   const ld = async () => setO(await api("/api/owner"));
@@ -195,6 +195,19 @@ function Owner({ d, reload }) {
   };
   const set = (key, value) => act({ action: "setSetting", key, value }, "✅ Sozlama saqlandi");
   if (!o) return <div className="wrap mut">Yuklanmoqda…</div>;
+  if (d.user.must_change)
+    return (
+      <div className="wrap fade">
+        <h2 className="gold">Xavfsizlik</h2>
+        <div className="card">
+          <b>Avval login va parolni o'zgartiring</b>
+          <p className="mut">Standart parol hammaga ma'lum. Yangi login va kamida 6 belgili parol yozing.</p>
+          <In f={cf} setF={setCf} k="login" ph="Yangi login" />
+          <In f={cf} setF={setCf} k="password" ph="Yangi parol (kamida 6 belgi)" type="password" />
+          <button className="btn" onClick={async () => { const r = await act({ action: "changeCreds", ...cf }); if (r.ok) setCf({}); }}>Saqlash</button>
+        </div>
+      </div>
+    );
 
   const absent = o.clients.filter((c) => !c.blocked).map((c) => ({ c, n: since(c.last_visit ?? c.created_at) })).sort((a, b) => b.n - a.n).filter((x) => x.n >= 3);
   const tabs = [["clients", "👥 Mijozlar"], ["att", "✅ Davomat"], ["shop", "🛒 Do'kon"], ["msg", "🔔 Xabar"], ["set", "⚙️ Sozlama"]];
@@ -286,6 +299,13 @@ function Owner({ d, reload }) {
 
       {tab === "set" && isOwner && (
         <>
+          <div className="card">
+            <b>Telegram bot</b>
+            {s.bot_username ? <div className="good" style={{ margin: "6px 0" }}>✅ Ulangan: <a href={"https://t.me/" + s.bot_username} style={{ color: "inherit" }}>@{s.bot_username}</a></div> : <p className="mut">Bot hali ulanmagan. @BotFather → /newbot orqali bot oching va tokenini shu yerga yozing.</p>}
+            <In f={bf} setF={setBf} k="token" ph="Bot tokeni (123456:AAH...)" />
+            <button className="btn" disabled={!bf.token} onClick={async () => { const r = await act({ action: "connectBot", token: bf.token }, "✅ Bot ulandi!"); if (r.ok) setBf({}); }}>{s.bot_username ? "Tokenni almashtirish" : "Botni ulash"}</button>
+            {s.bot_username && <button className="btn red" style={{ marginTop: 8 }} onClick={() => act({ action: "disconnectBot" }, "Bot uzildi")}>Botni uzish</button>}
+          </div>
           <div className="card">
             <b>Ilova dizayni</b>
             <select value={s.theme} onChange={(x) => set("theme", x.target.value)}>

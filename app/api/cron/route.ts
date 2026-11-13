@@ -3,7 +3,8 @@ import { db, getSettings, tzToday, addDays } from "@/lib/db";
 import { tg } from "@/lib/tg";
 
 export async function GET(req: Request) {
-  if (req.headers.get("authorization") !== `Bearer ${process.env.CRON_SECRET}`)
+  const key = new URL(req.url).searchParams.get("key");
+  if (req.headers.get("authorization") !== `Bearer ${process.env.CRON_SECRET}` && key !== process.env.CRON_SECRET)
     return new Response("forbidden", { status: 401 });
   const s = await getSettings();
   const today = tzToday();

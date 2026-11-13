@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { db, tzToday, addDays } from "@/lib/db";
 import { getUser } from "@/lib/auth";
 import { tg } from "@/lib/tg";
+import { encrypt, clearBotCache, getBotToken, webhookSecret, appUrl } from "@/lib/bot";
 
 const bad = (error: string, status = 400) => NextResponse.json({ error }, { status });
 const ok = () => NextResponse.json({ ok: true });
@@ -84,6 +85,32 @@ export async function POST(req: Request) {
       }
       const { error } = await db.from("users").update(upd).eq("id", u.id);
       return error ? bad(error.code === "23505" ? "Bu login band" : error.message) : ok();
+    }
+    case "connectBot": {
+      const token = String(b.token || "").trim();
+      if (!/^\d+:[\w-]{30,}$/.test(token)) return bad("Token noto'g'ri ko'rinadi. Namuna: 123456789:AAH... (BotFather'dan nusxalang)");
+      const me = await fetch(`https://api.telegram.org/bot${token}/getMe`).then((r) => r.json()).catch(() => null);
+      if (!me?.ok) return bad("Bu token Telegram'da topilmadi. BotFather'dan qayta nusxalang");
+      const url = appUrl(req);
+      if (!url.startsWith("https://")) return bad("Sayt manzili https bo'lishi kerak (APP_URL aniqlanmadi)");
+      const wh = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: `${url}/api/bot`, secret_token: webhookSecret(), allowed_updates: ["message"] }),
+      }).then((r) => r.json()).catch(() => null);
+      if (!wh?.ok) return bad("Webhook ulanmadi: " + (wh?.description || "noma'lum xato"));
+      await db.from("settings").upsert([
+        { key: "_bot", value: { enc: encrypt(token) } },
+        { key: "bot_username", value: me.result.username },
+      ]);
+      clearBotCache();
+      return ok();
+    }
+    case "disconnectBot": {
+      const token = await getBotToken();
+      if (token) await fetch(`https://api.telegram.org/bot${token}/deleteWebhook`).catch(() => {});
+      await db.from("settings").delete().in("key", ["_bot", "bot_username"]);
+      clearBotCache();
+      return ok();
     }
     case "notify": {
       if (!b.title) return bad("Sarlavha kerak");
