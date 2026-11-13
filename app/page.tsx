@@ -1,14 +1,28 @@
 // @ts-nocheck
 "use client";
 import { useEffect, useRef, useState } from "react";
+import QRCode from "qrcode";
+import { THEMES, HOLIDAY_THEMES, resolveTheme } from "@/lib/themes";
 
 const TG = () => (typeof window !== "undefined" ? window.Telegram?.WebApp : null);
 async function api(url, body) {
-  const r = await fetch(url, body ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : undefined);
-  const d = await r.json().catch(() => ({}));
-  return { ...d, ok: r.ok };
+  const ctl = new AbortController();
+  const tm = setTimeout(() => ctl.abort(), 30000);
+  try {
+    const r = await fetch(url, {
+      ...(body ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : {}),
+      signal: ctl.signal, cache: "no-store",
+    });
+    const d = await r.json().catch(() => ({}));
+    return { ...d, ok: r.ok };
+  } catch (e) {
+    return { ok: false, error: "Server javob bermadi. Qayta urinib ko'ring" };
+  } finally {
+    clearTimeout(tm);
+  }
 }
-const say = (t) => { try { if (TG()?.initData && TG().showAlert) return TG().showAlert(t); } catch (e) {} alert(t); };
+let toastSet = null;
+const say = (t) => { if (toastSet) toastSet(t); else alert(t); };
 const today = () => new Date(Date.now() + 5 * 3600e3).toISOString().slice(0, 10);
 const since = (d) => (d ? Math.floor((Date.now() - new Date(d)) / 864e5) : null);
 const name = (u) => [u?.first_name, u?.last_name].filter(Boolean).join(" ") || u?.login;
@@ -31,6 +45,74 @@ function Fall({ icon }) {
   return <canvas ref={ref} className="fall" />;
 }
 
+async function shrink(file, max = 800) {
+  const url = URL.createObjectURL(file);
+  const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+  const k = Math.min(1, max / Math.max(img.width, img.height));
+  const c = document.createElement("canvas");
+  c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+  c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+  URL.revokeObjectURL(url);
+  return new Promise((r) => c.toBlob(r, "image/jpeg", 0.82));
+}
+
+function Pick({ onUrl, children, cls = "btn ghost" }) {
+  const ref = useRef(null);
+  const [b, setB] = useState(false);
+  const pick = async (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    setB(true);
+    try {
+      const blob = await shrink(f);
+      const fd = new FormData();
+      fd.append("file", blob, "p.jpg");
+      const r = await fetch("/api/upload", { method: "POST", body: fd });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) onUrl(d.url); else say(d.error || "Rasm yuklanmadi");
+    } catch (err) { say("Rasm yuklanmadi"); }
+    setB(false);
+  };
+  return (
+    <>
+      <input ref={ref} type="file" accept="image/*" hidden onChange={pick} />
+      <button className={cls} disabled={b} onClick={() => ref.current.click()}>{b ? "Yuklanmoqda…" : children}</button>
+    </>
+  );
+}
+
+function QrLive() {
+  const [img, setImg] = useState(""), [full, setFull] = useState(false), [err, setErr] = useState("");
+  useEffect(() => {
+    let on = true;
+    const tick = async () => {
+      const r = await api("/api/qr");
+      if (!on) return;
+      if (!r.ok) return setErr(r.error || "QR olinmadi");
+      setErr("");
+      setImg(await QRCode.toDataURL(r.qr, { width: 640, margin: 1, color: { dark: "#000000", light: "#ffd400" } }));
+    };
+    tick();
+    const t = setInterval(tick, 15000);
+    return () => { on = false; clearInterval(t); };
+  }, []);
+  if (err) return <p className="bad">{err}</p>;
+  if (!img) return <p className="mut">QR tayyorlanmoqda…</p>;
+  return (
+    <>
+      <div className="qrbox"><img src={img} alt="QR" /></div>
+      <button className="btn" onClick={() => setFull(true)}>🔍 To'liq ekranda ko'rsatish</button>
+      {full && (
+        <div className="qrfull" onClick={() => setFull(false)}>
+          <img src={img} alt="QR" />
+          <div className="mut">Yopish uchun bosing</div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function Splash() {
   return (
     <div className="splash">
@@ -44,16 +126,31 @@ function Splash() {
 export default function Page() {
   const [boot, setBoot] = useState(true);
   const [d, setD] = useState(null);
-  const load = async () => setD(await api("/api/me"));
-  useEffect(() => { TG()?.ready(); TG()?.expand(); load(); setTimeout(() => setBoot(false), 2300); }, []);
+  const [toast, setToast] = useState("");
+  const load = async () => {
+    let r = await api("/api/me");
+    if (!r.ok) r = await api("/api/me");
+    setD(r);
+  };
+  useEffect(() => {
+    toastSet = (t) => { setToast(String(t)); setTimeout(() => setToast(""), 3200); };
+    TG()?.ready(); TG()?.expand(); load(); setTimeout(() => setBoot(false), 2300);
+    return () => { toastSet = null; };
+  }, []);
   const s = d?.settings;
-  useEffect(() => { document.documentElement.dataset.theme = s?.theme || "gold"; }, [s?.theme]);
+  const th = resolveTheme(s || {});
+  useEffect(() => {
+    const st = document.documentElement.style;
+    ["--gold", "--gold2", "--bg", "--card", "--line"].forEach((k) => st.removeProperty(k));
+    Object.entries(th.vars).forEach(([k, v]) => st.setProperty(k, v));
+  }, [th.id]);
   if (boot || !d) return <Splash />;
-  const icon = { winter: "❄", autumn: "🍂", spring: "🌸" }[s?.season];
+  const icon = { winter: "❄", autumn: "🍂", spring: "🌸" }[s?.season] || th.fall;
   return (
     <>
       {icon && <Fall icon={icon} />}
-      {!d.user ? <Login onDone={load} /> : d.user.role === "client" ? <Client d={d} reload={load} /> : <Owner d={d} reload={load} />}
+      {toast && <div className="toast">{toast}</div>}
+      {!d.user ? <Login onDone={load} /> : d.user.role === "client" ? <Client d={d} reload={load} th={th} /> : <Owner d={d} reload={load} th={th} />}
     </>
   );
 }
@@ -144,7 +241,7 @@ function Store({ reload }) {
   );
 }
 
-function Client({ d, reload }) {
+function Client({ d, reload, th }) {
   const [tab, setTab] = useState("home");
   const u = d.user, s = d.settings;
   const active = u.paid_until && u.paid_until >= today();
@@ -160,6 +257,7 @@ function Client({ d, reload }) {
   return (
     <div className="wrap fade">
       <div className="row between" style={{ marginBottom: 12 }}><h2 className="gold" style={{ margin: 0 }}>GOLD FIT</h2><div className="row"><span className={"tag " + (active ? "on" : "off")}>{active ? "Faol" : "To'lov kerak"}</span><Logout reload={reload} /></div></div>
+      {tab === "home" && th.banner && <div className="banner">{th.banner}</div>}
       {tab === "home" && (
         <>
           <div className="card row">
@@ -190,16 +288,19 @@ function In({ f, setF, k, ph, type = "text" }) {
   return <input placeholder={ph} type={type} value={f[k] || ""} onChange={(x) => setF({ ...f, [k]: x.target.value })} />;
 }
 
-function Owner({ d, reload }) {
+function Owner({ d, reload, th }) {
   const [tab, setTab] = useState("clients");
   const [o, setO] = useState(null);
   const [f, setF] = useState({}), [pf, setPf] = useState({}), [nf, setNf] = useState({ target: "all" }), [cf, setCf] = useState({}), [bf, setBf] = useState({});
   const [payDays, setPayDays] = useState(30);
+  const [busy, setBusy] = useState(false);
   const s = d.settings, isOwner = d.user.role === "owner";
   const ld = async () => setO(await api("/api/owner"));
   useEffect(() => { ld(); }, []);
   const act = async (body, msg) => {
+    setBusy(true);
     const r = await api("/api/owner", body);
+    setBusy(false);
     say(r.ok ? msg || "✅ Saqlandi" : r.error);
     await ld();
     if (r.ok && ["setSetting", "changeCreds"].includes(body.action)) reload();
@@ -225,8 +326,10 @@ function Owner({ d, reload }) {
   const tabs = [["clients", "👥", "Mijozlar"], ["att", "✅", "Davomat"], ["shop", "🛒", "Do'kon"], ["msg", "🔔", "Xabar"], ["set", "⚙️", "Sozlama"]];
 
   return (
-    <div className="wrap fade">
+    <div className={"wrap fade" + (busy ? " busy" : "")}>
+      {busy && <div className="topbar" />}
       <div className="row between" style={{ marginBottom: 12 }}><h2 className="gold" style={{ margin: 0 }}>GOLD FIT boshqaruv</h2><Logout reload={reload} /></div>
+      {th.banner && <div className="banner">{th.banner}</div>}
       {d.user.must_change && <div className="card bad">Xavfsizlik uchun "Sozlama" bo'limida login va parolni o'zgartiring.</div>}
 
       {tab === "clients" && (
@@ -261,16 +364,17 @@ function Owner({ d, reload }) {
 
       {tab === "att" && (
         <>
-          {o.displayUrl && (
-            <div className="card">
-              <b>📺 Zal kirishidagi QR ekran</b>
-              <p className="mut">Zal kirishida planshet yoki telefonda shu sahifani oching. Mijozlar ilovadagi "Zalga kirdim" tugmasi bilan shu QR ni skanerlaydi.</p>
-              <div className="row">
-                <button className="btn" onClick={() => (TG()?.openLink ? TG().openLink(o.displayUrl) : window.open(o.displayUrl, "_blank"))}>QR ekranni ochish</button>
+          <div className="card">
+            <b>📺 Zal kirishi uchun QR kod</b>
+            <p className="mut">Kod har 30 soniyada yangilanadi. Mijozlar ilovadagi "Zalga kirdim" tugmasi bilan shuni skanerlaydi.</p>
+            <QrLive />
+            {o.displayUrl && (
+              <div className="row" style={{ marginTop: 10 }}>
+                <button className="btn ghost" onClick={() => (TG()?.openLink ? TG().openLink(o.displayUrl) : window.open(o.displayUrl, "_blank"))}>Zal ekrani sahifasi</button>
                 <button className="btn ghost" onClick={() => { try { navigator.clipboard?.writeText(o.displayUrl); } catch (e) {} say("Havola nusxalandi"); }}>Havolani nusxalash</button>
               </div>
-            </div>
-          )}
+            )}
+          </div>
           <h3>Bugun kelganlar ({o.visits.length})</h3>
           {o.visits.length === 0 && <p className="mut">Bugun hali hech kim kelmagan</p>}
           {o.visits.map((v, i) => <div className="card row between" key={i}><span>{name(v.users)}</span><span className="mut">{new Date(v.at).toLocaleTimeString("uz-UZ", { hour: "2-digit", minute: "2-digit" })}</span></div>)}
@@ -288,15 +392,20 @@ function Owner({ d, reload }) {
             <b>Mahsulot qo'shish</b>
             <In f={pf} setF={setPf} k="name" ph="Nomi *" /><In f={pf} setF={setPf} k="price" ph="Narxi (so'm)" type="number" />
             <In f={pf} setF={setPf} k="stock" ph="Ombordagi soni" type="number" /><In f={pf} setF={setPf} k="category" ph="Kategoriya" />
-            <In f={pf} setF={setPf} k="image_url" ph="Rasm havolasi (URL)" />
+            <div className="row" style={{ marginBottom: 10 }}>
+              {pf.image_url && <img src={pf.image_url} alt="" style={{ width: 56, height: 56, borderRadius: 12, objectFit: "cover" }} />}
+              <Pick onUrl={(u) => setPf({ ...pf, image_url: u })}>📷 Rasm tanlash (galereya / fayl)</Pick>
+            </div>
             <button className="btn" onClick={async () => { const r = await act({ action: "saveProduct", ...pf }); if (r.ok) setPf({}); }}>Qo'shish</button>
           </div>
           {o.products.map((p) => (
             <div className="card" key={p.id}>
+              {p.image_url && <img src={p.image_url} alt="" style={{ width: "100%", maxHeight: 150, objectFit: "cover", borderRadius: 12, marginBottom: 8 }} />}
               <div className="row between"><b>{p.name}</b><span className={p.stock > 0 ? "mut" : "bad"}>{p.stock > 0 ? `Ombor: ${p.stock}` : "Qolmadi"}</span></div>
               <div className="mut">{p.category} · {p.price.toLocaleString()} so'm</div>
               <div className="row" style={{ marginTop: 8 }}>
                 <button className="btn sm" onClick={() => act({ action: "saveProduct", ...p, stock: p.stock + 10 }, "✅ +10 qo'shildi")}>+10 ombor</button>
+                <Pick cls="btn ghost sm" onUrl={(u) => act({ action: "saveProduct", ...p, image_url: u }, "✅ Rasm yangilandi")}>📷 Rasm</Pick>
                 <button className="btn ghost sm" onClick={() => act({ action: "saveProduct", ...p, active: !p.active })}>{p.active ? "Yashirish" : "Ko'rsatish"}</button>
                 <button className="btn red sm" onClick={() => act({ action: "delProduct", id: p.id }, "O'chirildi")}>O'chirish</button>
               </div>
@@ -331,8 +440,11 @@ function Owner({ d, reload }) {
           <div className="card">
             <b>Ilova dizayni</b>
             <select value={s.theme} onChange={(x) => set("theme", x.target.value)}>
-              <option value="gold">Oltin (asosiy)</option><option value="fire">Olov</option><option value="ice">Muz</option><option value="forest">Yashil</option>
+              <option value="auto">🤖 Avtomatik (bayramga qarab)</option>
+              <optgroup label="Asosiy dizaynlar">{THEMES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>
+              <optgroup label="Bayram shablonlari">{HOLIDAY_THEMES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>
             </select>
+            <p className="mut">Hozir ko'rinayotgani: {th.name}. Ramazon va hayit sanalari taxminiy, o'zgarsa qo'lda tanlang.</p>
             <select value={s.season} onChange={(x) => set("season", x.target.value)}>
               <option value="none">Fasl effekti yo'q</option><option value="winter">❄ Qish (qor)</option><option value="autumn">🍂 Kuz (barglar)</option><option value="spring">🌸 Bahor</option>
             </select>

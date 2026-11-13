@@ -15,7 +15,7 @@ input,select,textarea{width:100%;min-height:50px;background:#0f0f0f;border:1px s
 input[type=checkbox]{min-height:0}
 input:focus,select:focus,textarea:focus{border-color:var(--gold)}
 .btn{background:linear-gradient(90deg,var(--gold),var(--gold2));color:#111;border:0;border-radius:14px;min-height:50px;padding:12px 18px;font-weight:700;font-size:16px;cursor:pointer;width:100%}
-.btn.sm{width:auto;min-height:44px;padding:10px 16px;font-size:14px}
+.btn.sm{width:auto;min-height:48px;padding:12px 18px;font-size:15px}
 .btn.ghost{background:transparent;color:var(--txt);border:1px solid #3a3a3a}
 .btn.red{background:var(--bad);color:#fff}
 .btn:active{transform:scale(.98)}
@@ -47,3 +47,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--gold)}
 @keyframes rise{from{transform:translateY(14px);opacity:0}to{transform:none;opacity:1}}
 @keyframes load{from{transform:scaleX(0)}to{transform:scaleX(1)}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+.card .row>.btn.sm{flex:1 1 42%}
+.prod .row>.btn.sm{flex:none;min-width:50px}
+.banner{padding:13px 14px;border-radius:14px;margin-bottom:12px;font-weight:700;text-align:center;background:linear-gradient(90deg,var(--gold),var(--gold2));color:#111}
+.toast{position:fixed;left:16px;right:16px;bottom:calc(92px + env(safe-area-inset-bottom));z-index:100;background:#1d1d1d;border:1px solid var(--gold);padding:14px;border-radius:14px;text-align:center;box-shadow:0 8px 30px #000a;animation:rise .25s both}
+.topbar{position:fixed;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--gold),var(--gold2));z-index:100;transform-origin:left;animation:load 1.2s ease-in-out infinite}
+.busy .btn{pointer-events:none;opacity:.65}
+.qrbox{background:var(--gold);border-radius:16px;padding:8px;width:min(100%,300px);margin:10px auto}
+.qrbox img{width:100%;display:block;border-radius:10px}
+.qrfull{position:fixed;inset:0;background:#000e;z-index:200;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:20px}
+.qrfull img{width:min(90vw,80vh);border-radius:20px}
