@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { db, tzToday, addDays } from "@/lib/db";
 import { getUser } from "@/lib/auth";
 import { tg } from "@/lib/tg";
+import { PLANS, planOf } from "@/lib/plans";
 import { encrypt, clearBotCache, getBotToken, webhookSecret, appUrl } from "@/lib/bot";
 
 const bad = (error: string, status = 400) => NextResponse.json({ error }, { status });
@@ -13,15 +14,23 @@ export async function GET(req: Request) {
   const u = await getUser();
   if (!u || u.role === "client") return bad("Ruxsat yo'q", 403);
   const start = `${tzToday()}T00:00:00+05:00`;
-  const [c, p, v, b] = await Promise.all([
+  const mstart = `${tzToday().slice(0, 8)}01T00:00:00+05:00`;
+  const [c, p, v, b, mv, mp, od] = await Promise.all([
     db.from("users").select("*").eq("role", "client").order("created_at", { ascending: false }),
     db.from("products").select("*").order("created_at", { ascending: false }),
     db.from("visits").select("at, users(first_name,last_name)").gte("at", start).order("at", { ascending: false }),
     db.from("bot_users").select("*").order("created_at", { ascending: false }),
+    db.from("visits").select("user_id").gte("at", mstart),
+    db.from("payments").select("user_id, amount").gte("paid_at", mstart),
+    db.from("orders").select("id, total, items, created_at, users(first_name,last_name,phone)").order("created_at", { ascending: false }).limit(100),
   ]);
+  const monthVisits: Record<string, number> = {}, paidMonth: Record<string, number> = {};
+  (mv.data || []).forEach((x: any) => { monthVisits[x.user_id] = (monthVisits[x.user_id] || 0) + 1; });
+  (mp.data || []).forEach((x: any) => { paidMonth[x.user_id] = (paidMonth[x.user_id] || 0) + (x.amount || 0); });
+  const income = (mp.data || []).reduce((a: number, x: any) => a + (x.amount || 0), 0);
   const strip = (x: any) => { const { pass_hash, ...r } = x; return r; };
   return NextResponse.json({
-    clients: (c.data || []).map(strip), products: p.data || [], visits: v.data || [], botUsers: b.data || [],
+    clients: (c.data || []).map(strip), products: p.data || [], visits: v.data || [], botUsers: b.data || [], monthVisits, paidMonth, income, orders: od.data || [],
     displayUrl: u.role === "owner" && process.env.DISPLAY_KEY ? `${appUrl(req)}/display?key=${process.env.DISPLAY_KEY}` : null,
   });
 }
@@ -35,25 +44,32 @@ export async function POST(req: Request) {
   switch (b.action) {
     case "addClient": {
       if (!b.first_name || !b.phone || !b.login || !b.password) return bad("Ism, telefon, login va parol majburiy");
-      const days = +b.days || 0;
+      const P = planOf(b.plan);
+      const days = +b.days || P.days;
       const { data, error } = await db.from("users").insert({
         role: "client", first_name: b.first_name, last_name: b.last_name || null, phone: b.phone,
         login: String(b.login).trim(), pass_hash: await bcrypt.hash(String(b.password), 10),
-        monthly_fee: +b.monthly_fee || 0, paid_until: days ? addDays(today, days) : null,
+        monthly_fee: +b.monthly_fee || P.price, paid_until: days ? addDays(today, days) : null,
+        plan: P.id, card_uid: b.card_uid ? String(b.card_uid).trim() : null,
       }).select().single();
       if (error) return bad(error.code === "23505" ? "Bu login band" : error.message);
-      if (days) await db.from("payments").insert({ user_id: data.id, amount: +b.monthly_fee || 0, days });
+      if (days) await db.from("payments").insert({ user_id: data.id, amount: +b.monthly_fee || P.price, days, plan: P.id });
       return ok();
     }
     case "pay": {
-      const { data: c } = await db.from("users").select("paid_until").eq("id", b.id).single();
-      const days = +b.days || 30;
+      const { data: c } = await db.from("users").select("paid_until,plan").eq("id", b.id).single();
+      const P = planOf(b.plan || c?.plan);
+      const days = +b.days || P.days;
       const base = c?.paid_until && c.paid_until > today ? c.paid_until : today;
       await db.from("users").update({
-        paid_until: addDays(base, days), blocked: false, block_reason: null, unblocked_at: new Date().toISOString(),
+        paid_until: addDays(base, days), blocked: false, block_reason: null, unblocked_at: new Date().toISOString(), plan: P.id, monthly_fee: P.price,
       }).eq("id", b.id);
-      await db.from("payments").insert({ user_id: b.id, amount: +b.amount || 0, days });
+      await db.from("payments").insert({ user_id: b.id, amount: +b.amount || P.price, days, plan: P.id });
       return ok();
+    }
+    case "setCard": {
+      const { error } = await db.from("users").update({ card_uid: b.card_uid ? String(b.card_uid).trim() : null }).eq("id", b.id);
+      return error ? bad(error.code === "23505" ? "Bu karta boshqa mijozga biriktirilgan" : error.message) : ok();
     }
     case "block":
       await db.from("users").update(b.blocked

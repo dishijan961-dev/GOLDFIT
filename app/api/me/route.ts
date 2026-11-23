@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { db, getSettings } from "@/lib/db";
+import { db, getSettings, tzToday } from "@/lib/db";
 import { getUser, safe } from "@/lib/auth";
 
 export async function GET() {
@@ -8,7 +8,16 @@ export async function GET() {
   if (!u) return NextResponse.json({ user: null, settings });
   const { data: notes } = await db.from("notifications").select("*")
     .or(`user_id.is.null,user_id.eq.${u.id}`).order("created_at", { ascending: false }).limit(30);
-  return NextResponse.json({ user: safe(u), settings, notes });
+  let stats = null;
+  if (u.role === "client") {
+    const { data: vs } = await db.from("visits").select("at").eq("user_id", u.id).order("at", { ascending: false }).limit(500);
+    const days = new Set<string>((vs || []).map((x: any) => new Date(+new Date(x.at) + 5 * 3600e3).toISOString().slice(0, 10)));
+    const t = tzToday();
+    let streak = 0, d = days.has(t) ? t : new Date(+new Date(t) - 864e5).toISOString().slice(0, 10);
+    while (days.has(d)) { streak++; d = new Date(+new Date(d) - 864e5).toISOString().slice(0, 10); }
+    stats = { streak, month: [...days].filter((x) => x.slice(0, 7) === t.slice(0, 7)).length, total: vs?.length || 0 };
+  }
+  return NextResponse.json({ user: safe(u), settings, notes, stats });
 }
 
 export async function POST(req: Request) {

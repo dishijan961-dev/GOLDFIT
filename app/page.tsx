@@ -2,6 +2,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
+import { PLANS, planOf } from "@/lib/plans";
 import { THEMES, HOLIDAY_THEMES, resolveTheme } from "@/lib/themes";
 
 const TG = () => (typeof window !== "undefined" ? window.Telegram?.WebApp : null);
@@ -241,6 +242,94 @@ function Store({ reload }) {
   );
 }
 
+function boom() {
+  try { TG()?.HapticFeedback?.notificationOccurred("success"); } catch (e) {}
+  const c = document.createElement("canvas");
+  c.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:300";
+  const w = (c.width = innerWidth), h = (c.height = innerHeight);
+  document.body.appendChild(c);
+  const x = c.getContext("2d");
+  const cols = ["#ffd400", "#ff9d00", "#ffffff", "#ff4d2e", "#3ddc84", "#35c6ff"];
+  const p = Array.from({ length: 140 }, () => ({
+    x: w / 2, y: h * 0.6, vx: (Math.random() - 0.5) * 16, vy: -8 - Math.random() * 12,
+    s: 4 + Math.random() * 6, r: Math.random() * 6, vr: (Math.random() - 0.5) * 0.4, c: cols[(Math.random() * cols.length) | 0],
+  }));
+  let t = 0;
+  const loop = () => {
+    x.clearRect(0, 0, w, h);
+    p.forEach((o) => { o.vy += 0.35; o.x += o.vx; o.y += o.vy; o.r += o.vr; x.save(); x.translate(o.x, o.y); x.rotate(o.r); x.fillStyle = o.c; x.fillRect(-o.s / 2, -o.s / 4, o.s, o.s / 2); x.restore(); });
+    if (++t < 130) requestAnimationFrame(loop); else c.remove();
+  };
+  loop();
+}
+
+function useCount(n, ms = 1000) {
+  const [v, setV] = useState(0);
+  useEffect(() => {
+    let raf, t0;
+    const f = (t) => { if (t0 === undefined) t0 = t; const k = Math.min(1, (t - t0) / ms); setV(Math.round(n * (1 - Math.pow(1 - k, 3)))); if (k < 1) raf = requestAnimationFrame(f); };
+    raf = requestAnimationFrame(f);
+    return () => cancelAnimationFrame(raf);
+  }, [n]);
+  return v;
+}
+
+function Stat({ icon, n, label }) {
+  const v = useCount(n || 0);
+  return <div className="stat"><div className="si">{icon}</div><b>{v}</b><span>{label}</span></div>;
+}
+
+function VipCard({ u, stats, active }) {
+  const P = planOf(u.plan), ref = useRef(null);
+  const left = u.paid_until ? Math.max(0, Math.round((new Date(u.paid_until) - new Date(today())) / 864e5)) : 0;
+  const pct = !active ? 0 : Math.max(0.07, Math.min(1, left / Math.max(P.days, 1)));
+  const C = 2 * Math.PI * 44;
+  const shown = useCount(left);
+  const mv = (e) => {
+    const r = ref.current.getBoundingClientRect(), a = (e.clientX - r.left) / r.width - 0.5, b = (e.clientY - r.top) / r.height - 0.5;
+    ref.current.style.transform = `perspective(800px) rotateY(${a * 16}deg) rotateX(${-b * 16}deg)`;
+    ref.current.style.setProperty("--mx", (a + 0.5) * 100 + "%");
+  };
+  return (
+    <>
+      <div ref={ref} className={"vip " + P.id + (active ? "" : " dead")} onPointerMove={mv} onPointerLeave={() => (ref.current.style.transform = "")} onClick={boom}>
+        <div className="vip-top">
+          <img src="/logo.jpeg" alt="" />
+          <span className="plan-chip">{P.icon} {P.name}</span>
+        </div>
+        <div className="vip-mid">
+          <div>
+            <div className="vip-name">{name(u)}</div>
+            <div className="vip-sub">{u.tg_username ? "@" + u.tg_username : u.phone}</div>
+          </div>
+          <div className="ring">
+            <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="44" className="rb" /><circle cx="50" cy="50" r="44" className="rf" style={{ strokeDasharray: C, strokeDashoffset: C * (1 - pct) }} /></svg>
+            <div className="rn"><b>{shown}</b><span>kun</span></div>
+          </div>
+        </div>
+        <div className="vip-bot">
+          <span>{active ? "Amal qiladi: " + u.paid_until : "⛔ Obuna tugagan"}</span>
+          <span>{P.price.toLocaleString()} so'm</span>
+        </div>
+      </div>
+      <div className="perks">{P.perks.map((x) => <span key={x}>✓ {x}</span>)}</div>
+      <div className="stats">
+        <Stat icon="🔥" n={stats?.streak} label="ketma-ket kun" />
+        <Stat icon="📅" n={stats?.month} label="shu oy" />
+        <Stat icon="🏆" n={stats?.total} label="jami kelish" />
+      </div>
+    </>
+  );
+}
+
+function downloadCsv(rows, file) {
+  const csv = "\ufeff" + rows.map((r) => r.map((x) => `"${String(x ?? "").replace(/"/g, '""')}"`).join(";")).join("\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  a.download = file;
+  a.click();
+}
+
 function Client({ d, reload, th }) {
   const [tab, setTab] = useState("home");
   const u = d.user, s = d.settings;
@@ -249,25 +338,18 @@ function Client({ d, reload, th }) {
   const scan = () => TG()?.showScanQrPopup
     ? TG().showScanQrPopup({ text: "Zaldagi QR kodni skanerlang" }, (t) => {
         TG().closeScanQrPopup();
-        api("/api/checkin", { qr: t }).then((r) => { say(r.ok ? "✅ Xush kelibsiz!" : r.error); reload(); });
+        api("/api/checkin", { qr: t }).then((r) => { say(r.ok ? "✅ Xush kelibsiz!" : r.error); if (r.ok) boom(); reload(); });
         return true;
       })
     : say("Skaner faqat Telegram ichida ishlaydi");
   const tabs = [["home", "🏠", "Bosh"], ...(s.store_enabled ? [["store", "🛒", "Do'kon"]] : []), ["notes", "🔔", "Xabarlar"]];
   return (
     <div className="wrap fade">
-      <div className="row between" style={{ marginBottom: 12 }}><h2 className="gold" style={{ margin: 0 }}>GOLD FIT</h2><div className="row"><span className={"tag " + (active ? "on" : "off")}>{active ? "Faol" : "To'lov kerak"}</span><Logout reload={reload} /></div></div>
+      <div className="row between" style={{ marginBottom: 12 }}><h2 className="gold" style={{ margin: 0 }}>GOLD FIT</h2><div className="row"><span className={"tag " + (active ? "on" : "off")}>{planOf(u.plan).icon} {active ? planOf(u.plan).name : "To'lov kerak"}</span><Logout reload={reload} /></div></div>
       {tab === "home" && th.banner && <div className="banner">{th.banner}</div>}
       {tab === "home" && (
         <>
-          <div className="card row">
-            {u.tg_photo && <img src={u.tg_photo} width="56" height="56" style={{ borderRadius: "50%" }} alt="" />}
-            <div><b>{name(u)}</b><div className="mut">{u.phone}</div>{u.tg_username && <div className="mut">@{u.tg_username}</div>}</div>
-          </div>
-          <div className="card">
-            <div className="mut">Obuna muddati</div>
-            <b>{u.paid_until || "—"}</b>
-          </div>
+          <VipCard u={u} stats={d.stats} active={active} />
           <button className="btn" onClick={scan}>📷 Zalga kirdim (QR skaner)</button>
           <p className="mut">{inGym ? "✅ Siz zaldasiz, do'kondan buyurtma bera olasiz" : "Do'kondan buyurtma berish uchun avval QR kodni skanerlang"}</p>
           <div className="card row between">
@@ -292,7 +374,8 @@ function Owner({ d, reload, th }) {
   const [tab, setTab] = useState("clients");
   const [o, setO] = useState(null);
   const [f, setF] = useState({}), [pf, setPf] = useState({}), [nf, setNf] = useState({ target: "all" }), [cf, setCf] = useState({}), [bf, setBf] = useState({});
-  const [payDays, setPayDays] = useState(30);
+  const [payDays, setPayDays] = useState(0);
+  const [showAll, setShowAll] = useState(false);
   const [busy, setBusy] = useState(false);
   const s = d.settings, isOwner = d.user.role === "owner";
   const ld = async () => setO(await api("/api/owner"));
@@ -323,7 +406,7 @@ function Owner({ d, reload, th }) {
     );
 
   const absent = o.clients.filter((c) => !c.blocked).map((c) => ({ c, n: since(c.last_visit ?? c.created_at) })).sort((a, b) => b.n - a.n).filter((x) => x.n >= 3);
-  const tabs = [["clients", "👥", "Mijozlar"], ["att", "✅", "Davomat"], ["shop", "🛒", "Do'kon"], ["msg", "🔔", "Xabar"], ["set", "⚙️", "Sozlama"]];
+  const tabs = [["clients", "👥", "Mijozlar"], ["table", "📋", "Jadval"], ["att", "✅", "Davomat"], ["shop", "🛒", "Do'kon"], ["msg", "🔔", "Xabar"], ["set", "⚙️", "Sozlama"]];
 
   return (
     <div className={"wrap fade" + (busy ? " busy" : "")}>
@@ -331,6 +414,53 @@ function Owner({ d, reload, th }) {
       <div className="row between" style={{ marginBottom: 12 }}><h2 className="gold" style={{ margin: 0 }}>GOLD FIT boshqaruv</h2><Logout reload={reload} /></div>
       {th.banner && <div className="banner">{th.banner}</div>}
       {d.user.must_change && <div className="card bad">Xavfsizlik uchun "Sozlama" bo'limida login va parolni o'zgartiring.</div>}
+
+
+      {tab === "clients" && (() => {
+        const act2 = o.clients.filter((c) => !c.blocked && c.paid_until && c.paid_until >= today());
+        const by = Object.values(PLANS).map((p) => [p, act2.filter((c) => (c.plan || "monthly") === p.id).length]);
+        return (
+          <div className="card dash">
+            <div className="stats">
+              <div className="stat"><div className="si">👥</div><b>{act2.length}</b><span>faol</span></div>
+              <div className="stat"><div className="si">✅</div><b>{o.visits.length}</b><span>bugun keldi</span></div>
+              <div className="stat"><div className="si">💰</div><b>{Math.round((o.income || 0) / 1000)}k</b><span>oy tushumi</span></div>
+            </div>
+            <div className="row" style={{ marginTop: 10 }}>{by.map(([p, n]) => <span className="tag" key={p.id}>{p.icon} {p.name}: {n}</span>)}</div>
+          </div>
+        );
+      })()}
+
+      {tab === "table" && isOwner && (() => {
+        const list = o.clients.filter((c) => showAll || (!c.blocked && c.paid_until && c.paid_until >= today()));
+        const sum = list.reduce((a, c) => a + (o.paidMonth?.[c.id] || 0), 0);
+        const mon = today().slice(0, 7);
+        const csv = () => downloadCsv([["F.I.Sh", "Username", "TG ID", "Telefon", "Tarif", "To'lov (oy)", "Amal qiladi", "Davomat (oy)", "Karta"], ...list.map((c) => [name(c), c.tg_username ? "@" + c.tg_username : "", c.tg_id || "", c.phone, planOf(c.plan).name, o.paidMonth?.[c.id] || 0, c.paid_until || "", o.monthVisits?.[c.id] || 0, c.card_uid || ""]), ["", "", "", "", "JAMI", sum, "", "", ""]], `goldfit-${mon}.csv`);
+        return (
+          <>
+            <div className="row between" style={{ marginBottom: 8 }}>
+              <h3 style={{ margin: 0 }}>📋 {mon} oyi jadvali</h3>
+              <button className="btn sm" onClick={csv}>📥 Excel</button>
+            </div>
+            <label className="row mut" style={{ marginBottom: 8 }}><input type="checkbox" style={{ width: 20, margin: 0 }} checked={showAll} onChange={(x) => setShowAll(x.target.checked)} /> Kelmaganlar/bloklanganlarni ham ko'rsatish</label>
+            <div className="tbl"><table>
+              <thead><tr><th>#</th><th>F.I.Sh</th><th>Username</th><th>TG ID</th><th>Telefon</th><th>Tarif</th><th>To'lov</th><th>Muddat</th><th>Davomat</th><th>💳 Karta</th></tr></thead>
+              <tbody>
+                {list.map((c, i) => (
+                  <tr key={c.id} className={c.blocked ? "dim" : ""}>
+                    <td>{i + 1}</td><td>{name(c)}</td><td>{c.tg_username ? "@" + c.tg_username : "—"}</td><td>{c.tg_id || "—"}</td>
+                    <td>{c.phone} {c.tg_id ? "✅" : "⏳"}</td><td>{planOf(c.plan).icon} {planOf(c.plan).name}</td>
+                    <td>{(o.paidMonth?.[c.id] || 0).toLocaleString()}</td><td>{c.paid_until || "—"}</td><td>{o.monthVisits?.[c.id] || 0} kun</td>
+                    <td><input className="cardin" defaultValue={c.card_uid || ""} placeholder="—" onBlur={(x) => x.target.value !== (c.card_uid || "") && act({ action: "setCard", id: c.id, card_uid: x.target.value }, "✅ Karta biriktirildi")} /></td>
+                  </tr>
+                ))}
+                <tr className="sum"><td colSpan={6}>JAMI</td><td>{sum.toLocaleString()}</td><td colSpan={3}></td></tr>
+              </tbody>
+            </table></div>
+            <p className="mut">✅ — telefon Telegram bot orqali tasdiqlangan. Obunasi tugaganlar keyingi oyda jadvaldan avtomatik chiqib ketadi.</p>
+          </>
+        );
+      })()}
 
       {tab === "clients" && (
         <>
@@ -340,20 +470,22 @@ function Owner({ d, reload, th }) {
               <In f={f} setF={setF} k="first_name" ph="Ism *" /><In f={f} setF={setF} k="last_name" ph="Familiya" />
               <In f={f} setF={setF} k="phone" ph="Telefon raqami *" type="tel" />
               <In f={f} setF={setF} k="login" ph="Login *" /><In f={f} setF={setF} k="password" ph="Parol *" />
-              <In f={f} setF={setF} k="monthly_fee" ph="Oylik to'lov (so'm)" type="number" />
-              <In f={f} setF={setF} k="days" ph="Necha kunlik (masalan 30)" type="number" />
+              <select value={f.plan || "monthly"} onChange={(x) => setF({ ...f, plan: x.target.value })}>
+                {Object.values(PLANS).map((p) => <option key={p.id} value={p.id}>{p.icon} {p.name} — {p.price.toLocaleString()} so'm / {p.days} kun</option>)}
+              </select>
+              <In f={f} setF={setF} k="card_uid" ph="💳 Braslet/karta raqami (ixtiyoriy)" />
               <button className="btn" onClick={async () => { const r = await act({ action: "addClient", ...f }); if (r.ok) setF({}); }}>Mijozni qo'shish</button>
             </div>
           )}
-          {isOwner && <div className="row" style={{ marginBottom: 8 }}><span className="mut">To'lov muddati (kun):</span><input style={{ width: 80, margin: 0 }} type="number" value={payDays} onChange={(x) => setPayDays(x.target.value)} /></div>}
+          {isOwner && <div className="row" style={{ marginBottom: 8 }}><span className="mut">Kun soni (0 = tarif bo'yicha):</span><input style={{ width: 80, margin: 0 }} type="number" value={payDays} onChange={(x) => setPayDays(x.target.value)} /></div>}
           {o.clients.map((c) => (
             <div className="card" key={c.id}>
-              <div className="row between"><b>{name(c)}</b><span className={"tag " + (c.blocked ? "off" : "on")}>{c.blocked ? "Bloklangan" : "Faol"}</span></div>
+              <div className="row between"><b>{name(c)}</b><div className="row"><span className="tag">{planOf(c.plan).icon} {planOf(c.plan).name}</span><span className={"tag " + (c.blocked ? "off" : "on")}>{c.blocked ? "Bloklangan" : "Faol"}</span></div></div>
               <div className="mut">{c.phone} · login: {c.login}{c.tg_username ? " · @" + c.tg_username : ""}</div>
               <div className="mut">To'langan: {c.paid_until || "—"} · Oxirgi kelgan: {c.last_visit ? since(c.last_visit) + " kun oldin" : "hali kelmagan"}</div>
               {isOwner && (
                 <div className="row" style={{ marginTop: 8 }}>
-                  <button className="btn sm" onClick={() => act({ action: "pay", id: c.id, amount: c.monthly_fee, days: payDays }, "✅ To'lov yozildi")}>+{payDays} kun to'lov</button>
+                  <button className="btn sm" onClick={() => act({ action: "pay", id: c.id, plan: c.plan, days: +payDays || undefined }, "✅ To'lov yozildi")}>💰 {planOf(c.plan).name} to'lovi</button>
                   <button className={"btn sm " + (c.blocked ? "" : "red")} onClick={() => act({ action: "block", id: c.id, blocked: !c.blocked })}>{c.blocked ? "Blokdan ochish" : "Bloklash"}</button>
                 </div>
               )}
@@ -398,6 +530,16 @@ function Owner({ d, reload, th }) {
             </div>
             <button className="btn" onClick={async () => { const r = await act({ action: "saveProduct", ...pf }); if (r.ok) setPf({}); }}>Qo'shish</button>
           </div>
+          <h3>🧾 Kim nima xarid qildi</h3>
+          {(o.orders || []).length === 0 && <p className="mut">Hozircha buyurtma yo'q</p>}
+          {(o.orders || []).slice(0, 30).map((x) => (
+            <div className="card" key={x.id}>
+              <div className="row between"><b>{name(x.users) || "—"}</b><span className="gold">{(x.total || 0).toLocaleString()} so'm</span></div>
+              <div className="mut">{(x.items || []).map((i) => `${i.name} ×${i.qty}`).join(", ")}</div>
+              <div className="mut">{x.users?.phone} · {new Date(x.created_at).toLocaleString("uz-UZ")}</div>
+            </div>
+          ))}
+          <h3 style={{ marginTop: 16 }}>📦 Mahsulotlar</h3>
           {o.products.map((p) => (
             <div className="card" key={p.id}>
               {p.image_url && <img src={p.image_url} alt="" style={{ width: "100%", maxHeight: 150, objectFit: "cover", borderRadius: 12, marginBottom: 8 }} />}
@@ -456,6 +598,10 @@ function Owner({ d, reload, th }) {
             <input type="number" defaultValue={s.absent_days} onBlur={(x) => set("absent_days", +x.target.value || 10)} />
             <div className="mut">QR skanerlangach do'kon necha soat ochiq</div>
             <input type="number" defaultValue={s.checkin_hours} onBlur={(x) => set("checkin_hours", +x.target.value || 3)} />
+          </div>
+          <div className="card">
+            <b>🚪 Eshik / turniket</b>
+            <p className="mut">Kontroller (ESP32 va h.k.) karta raqamini <code>POST /api/door</code> ga yuboradi (header: <code>x-door-key</code>, body: {"{"}"card":"..."{"}"}). Javobda <code>open:true</code> bo'lsa eshik ochiladi. Render'da <code>DOOR_KEY</code> o'zgaruvchisini qo'shing.</p>
           </div>
           <div className="card">
             <b>Kirish ma'lumotlarini o'zgartirish</b>
