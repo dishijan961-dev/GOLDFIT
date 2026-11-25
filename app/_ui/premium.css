@@ -1,0 +1,200 @@
+/* GOLD FIT premium UI: qora fon + elektr sariq (logotipdagi rang) */
+:root {
+  --gfx-yellow: #ffd60a;
+  --gfx-gold: #e0a82e;
+  --gfx-ink: #07080a;
+  --gfx-panel: #101216;
+  --gfx-line: rgba(255, 255, 255, 0.09);
+  --gfx-text: #f4efe2;
+  --gfx-mute: #9b9686;
+}
+
+/* ---------- Tugmalar ---------- */
+.gfx-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 0;
+  font: inherit;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  overflow: hidden;
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.12s ease, filter 0.18s ease, box-shadow 0.18s ease;
+}
+.gfx-btn.pill { border-radius: 999px; }
+.gfx-btn.rect { border-radius: 12px; }
+.gfx-btn.block { display: flex; width: 100%; }
+.gfx-btn.s-sm { padding: 8px 16px; font-size: 13px; }
+.gfx-btn.s-md { padding: 12px 22px; font-size: 15px; }
+.gfx-btn.s-lg { padding: 16px 28px; font-size: 17px; }
+.gfx-btn .lbl { position: relative; z-index: 1; }
+.gfx-btn svg { position: relative; z-index: 1; flex: none; }
+.gfx-btn:active { transform: translateY(2px) scale(0.985); filter: brightness(0.94); }
+.gfx-btn:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+.gfx-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* yaltirash: bosganda/hoverda o'tadi */
+.gfx-btn .shine {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, 0.55) 50%, transparent 65%);
+  transform: translateX(-120%);
+  pointer-events: none;
+}
+.gfx-btn:hover .shine,
+.gfx-btn:focus-visible .shine { transform: translateX(120%); transition: transform 0.7s ease; }
+
+.gfx-btn.v-gold {
+  color: #1a1300;
+  background: linear-gradient(180deg, #fff4b5 0%, #ffd60a 24%, #d9a521 54%, #f6cf4d 78%, #a87914 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8), inset 0 -2px 0 rgba(110, 70, 0, 0.4), 0 10px 26px rgba(255, 190, 0, 0.28);
+}
+.gfx-btn.v-silver {
+  color: #15171a;
+  background: linear-gradient(180deg, #fbfbfc 0%, #cfd3d8 30%, #9ca1a8 54%, #dcdfe3 78%, #868b92 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), inset 0 -2px 0 rgba(60, 64, 70, 0.4), 0 10px 24px rgba(0, 0, 0, 0.45);
+}
+.gfx-btn.v-white {
+  color: #14161a;
+  background: linear-gradient(180deg, #ffffff, #eceef1);
+  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.08), 0 8px 22px rgba(0, 0, 0, 0.4);
+}
+.gfx-btn.v-glass {
+  color: #fff;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.05));
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+.gfx-btn.v-dark {
+  color: var(--gfx-yellow);
+  background: linear-gradient(180deg, #1b1e24, #101216);
+  border: 1px solid rgba(255, 214, 10, 0.35);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 8px 22px rgba(0, 0, 0, 0.5);
+}
+.gfx-btn.v-danger {
+  color: #fff;
+  background: linear-gradient(180deg, #ff8a7c, #e5483a 55%, #a92b20);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 10px 24px rgba(229, 72, 58, 0.3);
+}
+
+/* ---------- Shisha toggle ---------- */
+.gfx-toggle { display: inline-flex; align-items: center; gap: 12px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.gfx-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+.gfx-toggle .track {
+  position: relative;
+  width: 76px;
+  height: 40px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #3a3f66, #2a2e4d);
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  transition: background 0.3s ease, box-shadow 0.3s ease;
+}
+.gfx-toggle .knob {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: radial-gradient(circle at 30% 25%, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.12) 60%);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  transition: transform 0.28s cubic-bezier(0.3, 1.4, 0.5, 1);
+}
+.gfx-toggle .knob .on { display: none; }
+.gfx-toggle input:checked + .track {
+  background: linear-gradient(180deg, #ffe45c, #e0a82e);
+  box-shadow: inset 0 2px 6px rgba(120, 70, 0, 0.45), 0 0 18px rgba(255, 200, 0, 0.35);
+}
+.gfx-toggle input:checked + .track .knob { transform: translateX(36px); color: #5c3d00; }
+.gfx-toggle input:checked + .track .knob .on { display: block; }
+.gfx-toggle input:checked + .track .knob .off { display: none; }
+.gfx-toggle input:focus-visible + .track { outline: 2px solid #fff; outline-offset: 3px; }
+.gfx-toggle .txt { font-weight: 700; color: var(--gfx-text); }
+
+/* ---------- Bo'lim kartalari ---------- */
+.gfx-section {
+  position: relative;
+  border-radius: 20px;
+  padding: 18px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015)), var(--gfx-panel);
+  border: 1px solid var(--gfx-line);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+}
+.gfx-section > header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.gfx-section .badge {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  color: #1a1300;
+  background: linear-gradient(180deg, #fff4b5, #ffd60a 45%, #c8921c);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 6px 14px rgba(255, 190, 0, 0.25);
+}
+.gfx-section .ttl { flex: 1; min-width: 0; }
+.gfx-section h3 { margin: 0; font-size: 17px; font-weight: 800; color: var(--gfx-text); }
+.gfx-section .ttl p { margin: 2px 0 0; font-size: 13px; color: var(--gfx-mute); }
+.gfx-section .crown {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #1a1300;
+  background: linear-gradient(180deg, #fff4b5, #ffd60a 55%, #c8921c);
+}
+.gfx-section.is-super {
+  border-color: rgba(255, 214, 10, 0.55);
+  box-shadow: 0 0 0 1px rgba(255, 214, 10, 0.15), 0 0 38px rgba(255, 200, 0, 0.12), 0 14px 40px rgba(0, 0, 0, 0.5);
+}
+.gfx-section .body { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+
+/* ---------- Intro video ---------- */
+.gfx-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: #000;
+  display: grid;
+  place-items: center;
+  opacity: 1;
+  transition: opacity 0.6s ease;
+}
+.gfx-splash.out { opacity: 0; pointer-events: none; }
+.gfx-splash video { width: 100%; height: 100%; object-fit: cover; }
+.gfx-splash .skip {
+  position: absolute;
+  right: 16px;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  padding: 9px 16px;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gfx-btn, .gfx-btn .shine, .gfx-toggle .track, .gfx-toggle .knob, .gfx-splash { transition: none !important; }
+}
