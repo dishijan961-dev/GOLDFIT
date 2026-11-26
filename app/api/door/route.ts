@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { assignLocker } from "@/lib/lockers";
+import { assignLocker, lockerOf } from "@/lib/lockers";
+import { recordVisit } from "@/lib/visit";
 import { db, getSettings, tzToday } from "@/lib/db";
 
 // Eshik/turniket kontrolleri (ESP32 va h.k.) shu manzilga karta raqamini yuboradi:
@@ -14,11 +15,9 @@ export async function POST(req: Request) {
   if (!u) return NextResponse.json({ open: false, reason: "unknown_card" });
   if (u.blocked) return NextResponse.json({ open: false, reason: "blocked", name: u.first_name });
   if (!u.paid_until || u.paid_until < tzToday()) return NextResponse.json({ open: false, reason: "expired", name: u.first_name });
-  const now = new Date();
-  if (!u.last_visit || now.getTime() - new Date(u.last_visit).getTime() > 60000) await db.from("visits").insert({ user_id: u.id });
-  const s = await getSettings();
-  const until = new Date(now.getTime() + s.checkin_hours * 3600e3).toISOString();
-  await db.from("users").update({ last_visit: now.toISOString(), checked_in_until: until }).eq("id", u.id);
-  const locker = await assignLocker(u.id, until); // shkaf raqami: kontroller shu shkafni ochadi
+  // 1 daqiqa ichida takroran tutilsa, davomat ikki marta yozilmaydi
+  if (u.last_visit && Date.now() - new Date(u.last_visit).getTime() < 60000)
+    return NextResponse.json({ open: true, name: u.first_name, locker: await lockerOf(u.id) });
+  const { locker } = await recordVisit(u.id, "card"); // shkaf raqami: kontroller shu shkafni ochadi
   return NextResponse.json({ open: true, name: u.first_name, locker });
 }

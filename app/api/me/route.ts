@@ -9,9 +9,10 @@ export async function GET() {
   if (!u) return NextResponse.json({ user: null, settings });
   const { data: notes } = await db.from("notifications").select("*")
     .or(`user_id.is.null,user_id.eq.${u.id}`).order("created_at", { ascending: false }).limit(30);
-  let stats = null, locker = null, top: any[] = [];
+  let stats = null, locker = null, top: any[] = [], exercises: any[] = [];
   if (u.role === "client") {
     const ms = `${tzToday().slice(0, 8)}01T00:00:00+05:00`;
+    exercises = (await db.from("exercises").select("*").eq("active", true).order("grp").order("title")).data || [];
     const [lk, mv] = await Promise.all([
       settings.lockers_enabled ? lockerOf(u.id) : Promise.resolve(null),
       db.from("visits").select("user_id").gte("at", ms).limit(5000),
@@ -31,7 +32,7 @@ export async function GET() {
     while (days.has(d)) { streak++; d = new Date(+new Date(d) - 864e5).toISOString().slice(0, 10); }
     stats = { streak, month: [...days].filter((x) => x.slice(0, 7) === t.slice(0, 7)).length, total: vs?.length || 0 };
   }
-  return NextResponse.json({ user: safe(u), settings, notes, stats, locker, top });
+  return NextResponse.json({ user: safe(u), settings, notes, stats, locker, top, exercises });
 }
 
 export async function POST(req: Request) {

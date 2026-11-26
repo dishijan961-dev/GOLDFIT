@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client";
 import { useEffect, useState } from "react";
-import { PLANS, planOf } from "@/lib/plans";
+import { PLANS, planOf, TRAINER_FEE, GYM_PLANS } from "@/lib/plans";
 import { THEMES, HOLIDAY_THEMES } from "@/lib/themes";
 import { TG, api, say, today, since, name, Ic, PlanIc, Btn, Switch, Head, In, Tabs, Stat, Pick, QrLive, downloadCsv, downloadJson, pkSupported, pkEnroll, sfx, soundOn, setSound } from "./ui";
 
@@ -15,10 +15,28 @@ export default function Owner({ d, reload, th }) {
   const [f, setF] = useState({}), [pf, setPf] = useState({}), [nf, setNf] = useState({ target: "all" }), [cf, setCf] = useState({}), [bf, setBf] = useState({});
   const [payDays, setPayDays] = useState(0), [showAll, setShowAll] = useState(false), [showForm, setShowForm] = useState(false), [q, setQ] = useState("");
   const [busy, setBusy] = useState(false), [sup, setSup] = useState(false);
+  const [hist, setHist] = useState(null), [hr, setHr] = useState("day"), [hd, setHd] = useState(today()), [mi, setMi] = useState(""), [ef, setEf] = useState({}), [eg, setEg] = useState("");
   const [sec, setSec] = useState(null), [bk, setBk] = useState(false), [rf, setRf] = useState({}), [snd, setSnd] = useState(true), [rmsg, setRmsg] = useState("");
   const s = d.settings, isOwner = d.user.role === "owner";
   const ld = async () => setO(await api("/api/owner"));
   useEffect(() => { ld(); setSup(pkSupported()); setSnd(soundOn()); }, []);
+  const loadHist = async () => setHist(await api(`/api/owner?history=${hr}&date=${hd}`));
+  useEffect(() => { if (tab === "att") loadHist(); }, [tab, hr, hd]);
+  const manual = async (c, out) => {
+    setBusy(true);
+    let r = await api("/api/owner", { action: out ? "manualOut" : "manualIn", id: c.id });
+    if (!out && r.needForce) {
+      setBusy(false);
+      if (!confirm(`${r.error}. Baribir zalga kirgizamizmi?`)) return;
+      setBusy(true);
+      r = await api("/api/owner", { action: "manualIn", id: c.id, force: true });
+    }
+    setBusy(false);
+    sfx(r.ok ? "ok" : "bad");
+    say(r.ok ? (out ? `${name(c)} zaldan chiqdi` : r.locker ? `${name(c)} zalga kirdi. Shkaf №${r.locker}` : `${name(c)} zalga kirdi`) : r.error);
+    await ld();
+    if (tab === "att") loadHist();
+  };
   const act = async (body, msg) => {
     setBusy(true);
     const r = await api("/api/owner", body);
@@ -44,6 +62,9 @@ export default function Owner({ d, reload, th }) {
     </div>
   );
 
+  const lkOf = Object.fromEntries((o.lockers || []).filter((l) => l.user_id).map((l) => [l.user_id, l.num]));
+  const inGym = (c) => c.checked_in_until && new Date(c.checked_in_until) > new Date();
+  const gymNow = o.clients.filter(inGym);
   const isActive = (c) => !c.blocked && c.paid_until && c.paid_until >= today();
   const actives = o.clients.filter(isActive);
   const soon = o.clients.filter((c) => !c.blocked && c.paid_until && c.paid_until >= today() && since(c.paid_until) >= -3);
@@ -51,7 +72,7 @@ export default function Owner({ d, reload, th }) {
   const lockers = o.lockers || [];
   const busyL = lockers.filter((l) => l.user_id).length;
   const T = isOwner
-    ? [["home", "home", "Bosh"], ["clients", "users", "Mijozlar"], ["table", "table", "Jadval"], ["att", "check", "Davomat"], ["lockers", "locker", "Shkaflar"], ["shop", "cart", "Do'kon"], ["msg", "bell", "Xabar"], ["bot", "bot", "Bot"], ["set", "sliders", "Sozlama"]]
+    ? [["home", "home", "Bosh"], ["clients", "users", "Mijozlar"], ["table", "table", "Jadval"], ["att", "check", "Davomat"], ["lockers", "locker", "Shkaflar"], ["shop", "cart", "Do'kon"], ["exercises", "dumbbell", "Mashq"], ["msg", "bell", "Xabar"], ["bot", "bot", "Bot"], ["set", "sliders", "Sozlama"]]
     : [["clients", "users", "Mijozlar"], ["att", "check", "Davomat"]];
   const cur = isOwner ? tab : ["clients", "att"].includes(tab) ? tab : "clients";
   const mon = today().slice(0, 7);
@@ -120,25 +141,47 @@ export default function Owner({ d, reload, th }) {
               <In f={f} setF={setF} k="first_name" ph="Ism *" /><In f={f} setF={setF} k="last_name" ph="Familiya" />
               <In f={f} setF={setF} k="phone" ph="Telefon raqami *" type="tel" />
               <In f={f} setF={setF} k="login" ph="Login *" /><In f={f} setF={setF} k="password" ph="Parol *" />
+              <div className="mut">Zal tarifi</div>
               <select value={f.plan || "monthly"} onChange={(x) => setF({ ...f, plan: x.target.value })}>
-                {Object.values(PLANS).map((p) => <option key={p.id} value={p.id}>{p.name} — {p.price.toLocaleString()} so'm / {p.days} kun</option>)}
+                {GYM_PLANS.map((id) => PLANS[id]).map((p) => <option key={p.id} value={p.id}>{p.name} — {p.price.toLocaleString()} so'm / {p.days} kun</option>)}
               </select>
+              <In f={f} setF={setF} k="gym_fee" ph={`Zal puli (bo'sh = ${planOf(f.plan || "monthly").price.toLocaleString()} so'm)`} type="number" />
+              <Row title="Trener bilan" sub="Trener puli zal pulidan alohida hisoblanadi"><Switch on={!!f.trainer} onClick={() => setF({ ...f, trainer: !f.trainer })} /></Row>
+              {f.trainer && (<><In f={f} setF={setF} k="trainer_name" ph="Trener ismi (ixtiyoriy)" /><In f={f} setF={setF} k="trainer_fee" ph={`Trener puli (bo'sh = ${TRAINER_FEE.toLocaleString()} so'm)`} type="number" /></>)}
+              {(() => { const g = +f.gym_fee || planOf(f.plan || "monthly").price, t = f.trainer ? +f.trainer_fee || TRAINER_FEE : 0; return (
+                <div className="total"><div className="mut">Zal: {g.toLocaleString()}{f.trainer ? ` + Trener: ${t.toLocaleString()}` : ""}<br />JAMI to'lov</div><b>{(g + t).toLocaleString()} so'm</b></div>
+              ); })()}
               <In f={f} setF={setF} k="card_uid" ph="Braslet/karta raqami (ixtiyoriy)" />
-              <Btn icon="plus" onClick={async () => { const r = await act({ action: "addClient", ...f }); if (r.ok) { setF({}); setShowForm(false); } }}>Mijozni qo'shish</Btn>
+              <Btn icon="plus" onClick={async () => { const r = await act({ action: "addClient", ...f }, "Mijoz qo'shildi"); if (r.ok) { setF({}); setShowForm(false); } }}>Mijozni qo'shish</Btn>
             </div>
           )}
           <input placeholder="Qidirish: ism, telefon, username" value={q} onChange={(x) => setQ(x.target.value)} />
           {isOwner && <div className="row" style={{ marginBottom: 10 }}><span className="mut">Kun soni (0 = tarif bo'yicha):</span><input style={{ width: 80, margin: 0 }} type="number" value={payDays} onChange={(x) => setPayDays(x.target.value)} /></div>}
           {o.clients.filter((c) => !q || [name(c), c.phone, c.tg_username, c.login].join(" ").toLowerCase().includes(q.toLowerCase())).map((c) => (
             <div className="card" key={c.id}>
-              <div className="row between"><b>{name(c)}</b><div className="row"><span className="tag"><PlanIc id={c.plan || "monthly"} />{planOf(c.plan).name}</span><span className={"tag " + (c.blocked ? "off" : "on")}>{c.blocked ? "Bloklangan" : "Faol"}</span></div></div>
+              <div className="row between"><b>{name(c)}</b><div className="row">
+                <span className="tag"><PlanIc id={c.plan || "monthly"} />{planOf(c.plan).name}</span>
+                {c.trainer && <span className="tag"><PlanIc id="trainer" />Trener</span>}
+                {inGym(c) ? <span className="tag on">Zalda{lkOf[c.id] ? ` · №${lkOf[c.id]}` : ""}</span> : <span className={"tag " + (c.blocked ? "off" : "on")}>{c.blocked ? "Bloklangan" : "Faol"}</span>}
+              </div></div>
               <div className="mut">{c.phone} · login: {c.login}{c.tg_username ? " · @" + c.tg_username : ""}</div>
               <div className="mut">To'langan: {c.paid_until || "—"} · Oxirgi kelgan: {c.last_visit ? since(c.last_visit) + " kun oldin" : "hali kelmagan"}</div>
+              {isOwner && (() => { const g = c.gym_fee || planOf(c.plan).price, t = c.trainer ? c.trainer_fee || TRAINER_FEE : 0; return (
+                <div className="mut">Zal: {g.toLocaleString()}{c.trainer ? ` + Trener${c.trainer_name ? " (" + c.trainer_name + ")" : ""}: ${t.toLocaleString()}` : ""} = <b className="gold">{(g + t).toLocaleString()} so'm</b></div>
+              ); })()}
               {isOwner && (
-                <div className="row" style={{ marginTop: 10 }}>
-                  <Btn icon="wallet" cls="sm" onClick={() => act({ action: "pay", id: c.id, plan: c.plan, days: +payDays || undefined }, "To'lov yozildi")}>{planOf(c.plan).name} to'lovi</Btn>
-                  <Btn icon={c.blocked ? "check2" : "lock"} cls={"sm " + (c.blocked ? "dark" : "red")} onClick={() => act({ action: "block", id: c.id, blocked: !c.blocked })}>{c.blocked ? "Ochish" : "Bloklash"}</Btn>
-                </div>
+                <>
+                  <div className="row" style={{ marginTop: 10 }}>
+                    {inGym(c)
+                      ? <Btn icon="exit" cls="dark sm" onClick={() => manual(c, true)}>Zaldan chiqdi</Btn>
+                      : <Btn icon="enter" cls="sm" onClick={() => manual(c, false)}>Zalga kirdi</Btn>}
+                    <Btn icon="wallet" cls="sm" onClick={() => act({ action: "pay", id: c.id, plan: c.plan, days: +payDays || undefined }, "To'lov yozildi")}>To'lov: {((c.gym_fee || planOf(c.plan).price) + (c.trainer ? c.trainer_fee || TRAINER_FEE : 0)).toLocaleString()}</Btn>
+                  </div>
+                  <div className="row" style={{ marginTop: 8 }}>
+                    <Btn icon="dumbbell" cls="ghost sm" onClick={() => act({ action: "setTrainer", id: c.id, trainer: !c.trainer, charge: !c.trainer && isActive(c) && confirm("Trener puli hozir to'lansinmi?") }, c.trainer ? "Trener olib tashlandi" : "Trener qo'shildi")}>{c.trainer ? "Trenersiz qilish" : "Trener qo'shish"}</Btn>
+                    <Btn icon={c.blocked ? "check2" : "lock"} cls={"sm " + (c.blocked ? "dark" : "red")} onClick={() => act({ action: "block", id: c.id, blocked: !c.blocked })}>{c.blocked ? "Ochish" : "Bloklash"}</Btn>
+                  </div>
+                </>
               )}
             </div>
           ))}
@@ -174,8 +217,73 @@ export default function Owner({ d, reload, th }) {
 
       {cur === "att" && (
         <div className="fade">
-          <Head icon="check" title="Davomat" sub="Zal kirishi va kelganlar" />
+          <Head icon="check" title="Davomat" sub="Zalga kirish, kim qaysi shkafda, tarix" />
+          {isOwner && (
+            <div className="card">
+              <b>Qo'lda zalga kirgizish</b>
+              <p className="mut">Mijoz QR skaner qila olmasa, siz kirgizasiz. Unga do'kon va shkaf raqami avtomatik ochiladi.</p>
+              <select value={mi} onChange={(x) => setMi(x.target.value)}>
+                <option value="">Mijozni tanlang…</option>
+                {o.clients.filter((c) => !inGym(c)).map((c) => <option key={c.id} value={c.id}>{name(c)} ({c.phone}){isActive(c) ? "" : " — obunasi tugagan"}</option>)}
+              </select>
+              <Btn icon="enter" disabled={!mi} onClick={async () => { const c = o.clients.find((x) => x.id === mi); if (c) { await manual(c, false); setMi(""); } }}>Zalga kirdi</Btn>
+            </div>
+          )}
           <div className="card">
+            <div className="row between" style={{ marginBottom: 10 }}><b>Hozir zaldagilar ({gymNow.length})</b></div>
+            {gymNow.length === 0 && <p className="mut">Hozir zalda hech kim yo'q</p>}
+            {gymNow.map((c) => (
+              <div className="hrow" key={c.id}>
+                <div className="nm">{name(c)}<small>{planOf(c.plan).name}{c.trainer ? " + trener" : ""} · {new Date(c.checked_in_until).toLocaleTimeString("uz-UZ", { hour: "2-digit", minute: "2-digit" })} gacha</small></div>
+                {lkOf[c.id] ? <span className="lkb">№{lkOf[c.id]}</span> : <span className="mut">shkafsiz</span>}
+                {isOwner && <Btn icon="exit" cls="dark sm" onClick={() => manual(c, true)}>{""}</Btn>}
+              </div>
+            ))}
+          </div>
+
+          <Head icon="history" title="Davomat tarixi" sub="Kim kelgan, qaysi raqamli braslet/shkafni olgan" />
+          <div className="seg">{[["day", "Kunlik"], ["week", "Haftalik"], ["month", "Oylik"]].map(([k, t]) => <button key={k} className={hr === k ? "on" : ""} onClick={() => setHr(k)}>{t}</button>)}</div>
+          <input type="date" value={hd} onChange={(x) => setHd(x.target.value || today())} />
+          {!hist && <p className="mut">Yuklanmoqda…</p>}
+          {hist && (() => {
+            const rows = hist.rows || [];
+            const dkey = (at) => new Date(+new Date(at) + 5 * 3600e3).toISOString().slice(0, 10);
+            const by = {};
+            rows.forEach((r) => { (by[dkey(r.at)] = by[dkey(r.at)] || []).push(r); });
+            const days = Object.keys(by).sort().reverse();
+            const uniq = new Set(rows.map((r) => r.user_id)).size;
+            const mx = Math.max(1, ...days.map((k) => by[k].length));
+            const M = { qr: "QR", card: "Karta", manual: "Qo'lda" };
+            return (
+              <>
+                <div className="stats">
+                  <Stat icon="check" n={rows.length} label="jami kirish" />
+                  <Stat icon="users" n={uniq} label="alohida a'zo" />
+                  <Stat icon="calendar" n={days.length} label="faol kun" />
+                </div>
+                {hr !== "day" && days.length > 0 && (
+                  <div className="card"><div className="mut">{hist.from} — {hist.to}</div>
+                    <div className="dbar">{[...days].reverse().map((k) => <div key={k}><i style={{ height: Math.max(4, (by[k].length / mx) * 100) + "%" }} /><span>{k.slice(8)}</span></div>)}</div>
+                  </div>
+                )}
+                {rows.length === 0 && <p className="mut">Bu davrda hech kim kelmagan</p>}
+                {days.map((k) => (
+                  <div key={k}>
+                    <div className="dayh"><span>{k}</span><span className="gold">{by[k].length} ta kirish</span></div>
+                    {by[k].map((r) => (
+                      <div className="hrow" key={r.id}>
+                        <span className="tm">{new Date(r.at).toLocaleTimeString("uz-UZ", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tashkent" })}</span>
+                        <div className="nm">{name(r.users) || "—"}<small>{planOf(r.users?.plan).name}{r.users?.trainer ? " + trener" : ""}{r.method ? " · " + (M[r.method] || r.method) : ""}</small></div>
+                        {r.locker ? <span className="lkb">№{r.locker}</span> : <span className="mut">—</span>}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </>
+            );
+          })()}
+
+          <div className="card" style={{ marginTop: 16 }}>
             <b>Zal kirishi uchun QR kod</b>
             <p className="mut">Kod har 30 soniyada yangilanadi. Mijozlar ilovadagi "Zalga kirdim" tugmasi bilan shuni skanerlaydi.</p>
             <QrLive />
@@ -186,9 +294,6 @@ export default function Owner({ d, reload, th }) {
               </div>
             )}
           </div>
-          <h3>Bugun kelganlar ({o.visits.length})</h3>
-          {o.visits.length === 0 && <p className="mut">Bugun hali hech kim kelmagan</p>}
-          {o.visits.map((v, i) => <div className="card row between" key={i}><span>{name(v.users)}</span><span className="mut">{new Date(v.at).toLocaleTimeString("uz-UZ", { hour: "2-digit", minute: "2-digit" })}</span></div>)}
           <h3 style={{ marginTop: 16 }}>Uzoq kelmaganlar</h3>
           <p className="mut">{s.auto_block ? `${s.absent_days} kun kelmaganlar avtomatik bloklanadi` : "Avto-blok o'chirilgan"}</p>
           {absent.length === 0 && <p className="mut">Hamma yaqinda kelgan</p>}
@@ -262,21 +367,79 @@ export default function Owner({ d, reload, th }) {
         </div>
       )}
 
-      {cur === "msg" && isOwner && (
+      {cur === "exercises" && isOwner && (
         <div className="fade">
-          <Head icon="bell" title="Xabar yuborish" sub="Ilova va Telegram orqali" />
+          <Head icon="dumbbell" title="Mashqlar" sub="Mijozlar ilovada shu mashqlarni ko'radi" />
           <div className="card">
-            <select value={nf.target} onChange={(x) => setNf({ ...nf, target: x.target.value })}>
-              <option value="all">Hammaga</option><option value="unpaid">To'lamaganlarga</option>
-              {o.clients.map((c) => <option key={c.id} value={c.id}>{name(c)} ({c.phone})</option>)}
+            <b>Yangi mashq</b>
+            <In f={ef} setF={setEf} k="title" ph="Mashq nomi *" />
+            <select value={ef.grp || ""} onChange={(x) => setEf({ ...ef, grp: x.target.value })}>
+              <option value="">Mushak guruhi…</option>
+              {["Ko'krak", "Orqa", "Oyoq", "Yelka", "Qo'l", "Press", "Kardio", "Boshqa"].map((g) => <option key={g} value={g}>{g}</option>)}
             </select>
-            <In f={nf} setF={setNf} k="title" ph="Sarlavha" />
-            <textarea rows={4} placeholder="Xabar matni" value={nf.body || ""} onChange={(x) => setNf({ ...nf, body: x.target.value })} />
-            <Row title="Ovozsiz yuborish"><Switch on={!!nf.silent} onClick={() => setNf({ ...nf, silent: !nf.silent })} /></Row>
-            <Btn icon="send" onClick={async () => { const r = await act({ action: "notify", ...nf }, "Yuborildi"); if (r.ok) setNf({ target: "all" }); }}>Yuborish</Btn>
+            <div className="row"><input style={{ flex: 1 }} placeholder="Yondashuv" type="number" value={ef.sets || ""} onChange={(x) => setEf({ ...ef, sets: x.target.value })} /><input style={{ flex: 1 }} placeholder="Takror (10-12)" value={ef.reps || ""} onChange={(x) => setEf({ ...ef, reps: x.target.value })} /></div>
+            <textarea rows={3} placeholder="Qanday bajariladi (maslahat)" value={ef.note || ""} onChange={(x) => setEf({ ...ef, note: x.target.value })} />
+            <div className="row" style={{ marginBottom: 10 }}>
+              {ef.image_url && <img src={ef.image_url} alt="" style={{ width: 56, height: 56, borderRadius: 12, objectFit: "cover" }} />}
+              <Pick onUrl={(u) => setEf({ ...ef, image_url: u })}>Rasm tanlash</Pick>
+            </div>
+            <Btn icon="plus" onClick={async () => { const r = await act({ action: "saveExercise", ...ef }, "Mashq qo'shildi"); if (r.ok) setEf({}); }}>Qo'shish</Btn>
           </div>
+          {(o.exercises || []).length === 0 && <Btn icon="download" cls="ghost" onClick={() => act({ action: "seedExercises" }, "Standart mashqlar qo'shildi")}>Standart mashqlarni qo'shish (12 ta)</Btn>}
+          {(o.exercises || []).length > 0 && (
+            <div className="chips">{["", ...new Set((o.exercises || []).map((x) => x.grp).filter(Boolean))].map((g) => <button key={g} className={eg === g ? "on" : ""} onClick={() => setEg(g)}>{g || "Hammasi"}</button>)}</div>
+          )}
+          {(o.exercises || []).filter((x) => !eg || x.grp === eg).map((x) => (
+            <div className="card ex" key={x.id}>
+              {x.image_url && <img src={x.image_url} alt="" />}
+              <div style={{ flex: 1 }}>
+                <div className="row between"><b>{x.title}</b><span className="tag">{x.grp || "—"}</span></div>
+                <div className="mut">{x.sets ? x.sets + " yondashuv" : ""}{x.reps ? " × " + x.reps : ""}</div>
+                {x.note && <div className="mut">{x.note}</div>}
+                <div className="row" style={{ marginTop: 8 }}>
+                  <Btn icon="lock" cls="ghost sm" onClick={() => act({ action: "saveExercise", ...x, active: !x.active })}>{x.active ? "Yashirish" : "Ko'rsatish"}</Btn>
+                  <Btn icon="trash" cls="red sm" onClick={() => confirm("O'chiramizmi?") && act({ action: "delExercise", id: x.id }, "O'chirildi")}>{""}</Btn>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       )}
+
+      {cur === "msg" && isOwner && (() => {
+        const TPL = [
+          ["Dam olish kuni", "Zal ish vaqti haqida", "Aziz a'zolarimiz! Bayram munosabati bilan zal ertaga dam oladi. Ko'rishguncha!"],
+          ["Yangi aksiya", "Yangi aksiya!", "Shu hafta oylik obunaga chegirma bor. Zalda administratorga murojaat qiling."],
+          ["Obuna eslatmasi", "Obuna eslatmasi", "Obuna muddatingiz tugayapti. Uzilib qolmaslik uchun zalda to'lovni amalga oshiring."],
+          ["Yangi mahsulot", "Do'konda yangilik", "Zal do'konida yangi mahsulotlar paydo bo'ldi. Ilovadan buyurtma bering!"],
+        ];
+        const TG_ = [["all", "Hammaga"], ["active", "Faol a'zolar"], ["unpaid", "To'lamaganlar"], ["premium", "Premium"], ["trainer", "Trener bilan"], ["ingym", "Hozir zaldagilar"], ["botall", "Bot foydalanuvchilari ham"]];
+        return (
+          <div className="fade">
+            <Head icon="send" title="Hammaga xabar" sub="Ilovaga va Telegramga yuboriladi" />
+            <div className="card">
+              <b>Kimga</b>
+              <div className="chips" style={{ marginTop: 8 }}>{TG_.map(([k, t]) => <button key={k} className={nf.target === k ? "on" : ""} onClick={() => setNf({ ...nf, target: k })}>{t}</button>)}</div>
+              <select value={TG_.some(([k]) => k === nf.target) ? "" : nf.target} onChange={(x) => x.target.value && setNf({ ...nf, target: x.target.value })}>
+                <option value="">Yoki bitta mijozni tanlang…</option>
+                {o.clients.map((c) => <option key={c.id} value={c.id}>{name(c)} ({c.phone})</option>)}
+              </select>
+              <b>Namunalar</b>
+              <div className="chips" style={{ marginTop: 8 }}>{TPL.map(([t, ti, bo]) => <button key={t} onClick={() => setNf({ ...nf, title: ti, body: bo })}>{t}</button>)}</div>
+              <In f={nf} setF={setNf} k="title" ph="Sarlavha *" />
+              <textarea rows={6} placeholder="Xabar matnini shu yerga yozing…" maxLength={1000} value={nf.body || ""} onChange={(x) => setNf({ ...nf, body: x.target.value })} />
+              <div className="mut" style={{ textAlign: "right", marginTop: -6, marginBottom: 8 }}>{(nf.body || "").length}/1000</div>
+              <Row title="Ovozsiz yuborish" sub="Telegramda tovush chiqmaydi"><Switch on={!!nf.silent} onClick={() => setNf({ ...nf, silent: !nf.silent })} /></Row>
+              <Btn icon="send" disabled={!nf.title} onClick={async () => {
+                const who = TG_.find(([k]) => k === nf.target)?.[1] || "tanlangan mijozga";
+                if (!confirm(`"${who}" xabar yuboriladi. Davom etamizmi?`)) return;
+                const r = await act({ action: "notify", ...nf }, "Yuborildi");
+                if (r.ok) { setNf({ target: nf.target }); say(`Yuborildi. Telegramga: ${r.sent || 0} kishi`); }
+              }}>Yuborish</Btn>
+            </div>
+          </div>
+        );
+      })()}
 
       {cur === "bot" && isOwner && (
         <div className="fade">

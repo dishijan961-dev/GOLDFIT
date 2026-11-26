@@ -3,7 +3,8 @@ import bcrypt from "bcryptjs";
 import { db, tzToday, addDays, clearSettingsCache } from "@/lib/db";
 import { getUser } from "@/lib/auth";
 import { tg } from "@/lib/tg";
-import { PLANS, planOf } from "@/lib/plans";
+import { planOf, TRAINER_FEE } from "@/lib/plans";
+import { recordVisit, recordExit } from "@/lib/visit";
 import { ensureLockers, releaseExpired } from "@/lib/lockers";
 import { encrypt, clearBotCache, getBotToken, webhookSecret, appUrl } from "@/lib/bot";
 
@@ -11,42 +12,45 @@ const bad = (error: string, status = 400) => NextResponse.json({ error }, { stat
 const ok = () => NextResponse.json({ ok: true });
 const SETTING_KEYS = ["store_enabled", "theme", "season", "absent_days", "auto_block", "checkin_hours", "lockers_enabled", "lockers_count", "remind_on", "remind_days", "bot_welcome", "absent_msg_on", "absent_msg_days", "summary_on"];
 
-// Supabase bir so'rovda 1000 qatordan ortiq bermaydi: sahifalab o'qiymiz
-async function all(build: () => any) {
-  const out: any[] = [];
-  for (let i = 0; i < 100; i++) {
-    const { data } = await build().range(i * 1000, i * 1000 + 999);
-    if (!data?.length) break;
-    out.push(...data);
-    if (data.length < 1000) break;
-  }
-  return out;
-}
-
 export async function GET(req: Request) {
   const u = await getUser();
   if (!u || u.role === "client") return bad("Ruxsat yo'q", 403);
   const start = `${tzToday()}T00:00:00+05:00`;
+  const url = new URL(req.url);
+  const range = url.searchParams.get("history");
+  if (range) {
+    // Davomat tarixi: kun / hafta / oy
+    const date = url.searchParams.get("date") || tzToday();
+    let from = date, to = date;
+    if (range === "week") { const dow = (new Date(date).getUTCDay() + 6) % 7; from = addDays(date, -dow); to = addDays(from, 6); }
+    if (range === "month") { from = date.slice(0, 8) + "01"; const m = new Date(from); m.setUTCMonth(m.getUTCMonth() + 1); to = addDays(m.toISOString().slice(0, 10), -1); }
+    const q = (cols: string) => db.from("visits").select(cols).gte("at", `${from}T00:00:00+05:00`).lt("at", `${addDays(to, 1)}T00:00:00+05:00`).order("at", { ascending: false }).limit(2000);
+    let r: any = await q("id, at, locker, method, user_id, users(first_name,last_name,phone,plan,trainer)");
+    if (r.error) r = await q("id, at, user_id, users(first_name,last_name,phone,plan)");
+    return NextResponse.json({ from, to, rows: r.data || [] });
+  }
   await releaseExpired();
   const mstart = `${tzToday().slice(0, 8)}01T00:00:00+05:00`;
-  const [c, p, v, b, mv, mp, od, lk] = await Promise.all([
+  const [c, p, v, b, mv, mp, od, lk, ex] = await Promise.all([
     db.from("users").select("*").eq("role", "client").order("created_at", { ascending: false }),
     db.from("products").select("*").order("created_at", { ascending: false }),
     db.from("visits").select("at, users(first_name,last_name)").gte("at", start).order("at", { ascending: false }),
     db.from("bot_users").select("*").order("created_at", { ascending: false }),
-    all(() => db.from("visits").select("user_id, at").gte("at", mstart).order("id")).then((data) => ({ data })),
-    all(() => db.from("payments").select("user_id, amount").gte("paid_at", mstart).order("id")).then((data) => ({ data })),
+    db.from("visits").select("user_id, at").gte("at", mstart).limit(5000),
+    db.from("payments").select("user_id, amount").gte("paid_at", mstart),
     db.from("orders").select("id, total, items, created_at, users(first_name,last_name,phone)").order("created_at", { ascending: false }).limit(100),
     db.from("lockers").select("num, user_id, until, users(first_name,last_name)").order("num"),
+    db.from("exercises").select("*").order("grp").order("title"),
   ]);
-  const monthVisits: Record<string, number> = {}, paidMonth: Record<string, number> = {}, hours: number[] = Array(24).fill(0);
-  (mv.data || []).forEach((x: any) => { monthVisits[x.user_id] = (monthVisits[x.user_id] || 0) + 1; hours[new Date(+new Date(x.at) + 5 * 3600e3).getUTCHours()]++; });
-  const { data: ot } = await db.from("settings").select("value").eq("key", "_owner_tg").maybeSingle();
+  const hours = Array(24).fill(0);
+  (mv.data || []).forEach((x: any) => { hours[new Date(+new Date(x.at) + 5 * 3600e3).getUTCHours()]++; });
+  const monthVisits: Record<string, number> = {}, paidMonth: Record<string, number> = {};
+  (mv.data || []).forEach((x: any) => { monthVisits[x.user_id] = (monthVisits[x.user_id] || 0) + 1; });
   (mp.data || []).forEach((x: any) => { paidMonth[x.user_id] = (paidMonth[x.user_id] || 0) + (x.amount || 0); });
   const income = (mp.data || []).reduce((a: number, x: any) => a + (x.amount || 0), 0);
   const strip = (x: any) => { const { pass_hash, ...r } = x; return r; };
   return NextResponse.json({
-    clients: (c.data || []).map(strip), products: p.data || [], visits: v.data || [], botUsers: b.data || [], monthVisits, paidMonth, income, hours, ownerTg: !!ot, orders: od.data || [], lockers: lk.data || [],
+    clients: (c.data || []).map(strip), products: p.data || [], visits: v.data || [], botUsers: b.data || [], monthVisits, paidMonth, income, orders: od.data || [], lockers: lk.data || [], exercises: ex.data || [], hours, ownerTg: u.tg_id || null,
     displayUrl: u.role === "owner" && process.env.DISPLAY_KEY ? `${appUrl(req)}/display?key=${process.env.DISPLAY_KEY}` : null,
   });
 }
@@ -62,25 +66,100 @@ export async function POST(req: Request) {
       if (!b.first_name || !b.phone || !b.login || !b.password) return bad("Ism, telefon, login va parol majburiy");
       const P = planOf(b.plan);
       const days = +b.days || P.days;
+      const gym = +b.gym_fee || P.price;                                   // zal puli
+      const tr = b.trainer ? +b.trainer_fee || TRAINER_FEE : 0;            // trener puli (alohida)
       const { data, error } = await db.from("users").insert({
         role: "client", first_name: b.first_name, last_name: b.last_name || null, phone: b.phone,
         login: String(b.login).trim(), pass_hash: await bcrypt.hash(String(b.password), 10),
-        monthly_fee: +b.monthly_fee || P.price, paid_until: days ? addDays(today, days) : null,
-        plan: P.id, card_uid: b.card_uid ? String(b.card_uid).trim() : null,
+        monthly_fee: gym + tr, gym_fee: gym, trainer: !!b.trainer, trainer_fee: tr, trainer_name: b.trainer_name || null,
+        paid_until: days ? addDays(today, days) : null, plan: P.id, card_uid: b.card_uid ? String(b.card_uid).trim() : null,
       }).select().single();
       if (error) return bad(error.code === "23505" ? "Bu login band" : error.message);
-      if (days) await db.from("payments").insert({ user_id: data.id, amount: +b.monthly_fee || P.price, days, plan: P.id });
-      return ok();
+      if (days) await db.from("payments").insert({ user_id: data.id, amount: gym + tr, gym_amount: gym, trainer_amount: tr, days, plan: P.id });
+      return NextResponse.json({ ok: true, total: gym + tr });
     }
     case "pay": {
-      const { data: c } = await db.from("users").select("paid_until,plan").eq("id", b.id).single();
+      const { data: c } = await db.from("users").select("paid_until,plan,gym_fee,trainer,trainer_fee").eq("id", b.id).single();
       const P = planOf(b.plan || c?.plan);
       const days = +b.days || P.days;
+      const gym = +b.gym_fee || (c?.plan === P.id && c?.gym_fee ? c.gym_fee : P.price);
+      const tr = c?.trainer ? c.trainer_fee || TRAINER_FEE : 0;
       const base = c?.paid_until && c.paid_until > today ? c.paid_until : today;
       await db.from("users").update({
-        paid_until: addDays(base, days), blocked: false, block_reason: null, unblocked_at: new Date().toISOString(), plan: P.id, monthly_fee: P.price,
+        paid_until: addDays(base, days), blocked: false, block_reason: null, unblocked_at: new Date().toISOString(),
+        plan: P.id, gym_fee: gym, monthly_fee: gym + tr,
       }).eq("id", b.id);
-      await db.from("payments").insert({ user_id: b.id, amount: +b.amount || P.price, days, plan: P.id });
+      await db.from("payments").insert({ user_id: b.id, amount: +b.amount || gym + tr, gym_amount: gym, trainer_amount: tr, days, plan: P.id });
+      return NextResponse.json({ ok: true, total: +b.amount || gym + tr });
+    }
+    case "setTrainer": {
+      const { data: c } = await db.from("users").select("gym_fee,plan").eq("id", b.id).single();
+      const tr = b.trainer ? +b.trainer_fee || TRAINER_FEE : 0;
+      const gym = c?.gym_fee || planOf(c?.plan).price;
+      await db.from("users").update({ trainer: !!b.trainer, trainer_fee: tr, trainer_name: b.trainer ? b.trainer_name || null : null, monthly_fee: gym + tr }).eq("id", b.id);
+      if (b.trainer && b.charge) await db.from("payments").insert({ user_id: b.id, amount: tr, gym_amount: 0, trainer_amount: tr, days: 0, plan: c?.plan });
+      return ok();
+    }
+    case "manualIn": {
+      // Zal egasi qo'lda "zalga kirdi" qiladi: do'kon va shkaf raqami ochiladi
+      const { data: c } = await db.from("users").select("*").eq("id", b.id).eq("role", "client").single();
+      if (!c) return bad("Mijoz topilmadi");
+      const expired = !c.paid_until || c.paid_until < today;
+      if ((c.blocked || expired) && !b.force)
+        return NextResponse.json({ error: c.blocked ? "Mijoz bloklangan" : "Obunasi tugagan", needForce: true }, { status: 409 });
+      const { locker } = await recordVisit(c.id, "manual");
+      return NextResponse.json({ ok: true, locker });
+    }
+    case "manualOut":
+      await recordExit(b.id);
+      return ok();
+    case "saveExercise": {
+      const row = { title: b.title, grp: b.grp || null, sets: +b.sets || null, reps: b.reps || null, note: b.note || null, image_url: b.image_url || null, active: b.active !== false };
+      if (!row.title) return bad("Mashq nomi kerak");
+      const r = b.id ? await db.from("exercises").update(row).eq("id", b.id) : await db.from("exercises").insert(row);
+      return r.error ? bad(r.error.message) : ok();
+    }
+    case "delExercise":
+      await db.from("exercises").delete().eq("id", b.id);
+      return ok();
+    case "seedExercises": {
+      const E = [
+        ["Yotib shtanga siqish", "Ko'krak", 4, "8-10", "Yelka kuraklarini jipslang, shtangani ko'krak o'rtasigacha tushiring."],
+        ["Gantel bilan yotib siqish", "Ko'krak", 3, "10-12", "Gantellarni yuqorida birlashtirmasdan, sekin tushiring."],
+        ["Turnikda tortilish", "Orqa", 4, "6-10", "Tirsaklarni tanaga tomon torting, tanani tebratmang."],
+        ["Shtanga bilan tortish", "Orqa", 4, "10", "Orqani to'g'ri ushlab, shtangani qoringa tortib keling."],
+        ["Squat", "Oyoq", 4, "10-12", "Tizzalar oyoq uchi bilan bir yo'nalishda, orqa to'g'ri."],
+        ["Oyoq pressi", "Oyoq", 4, "12", "Tizzani to'liq yozib qo'ymang, yuklamani nazorat qiling."],
+        ["Yelka pressi", "Yelka", 4, "10", "Gantelni bosh ustiga ko'taring, belni egmang."],
+        ["Yon tomonga gantel ko'tarish", "Yelka", 3, "15", "Yengil vazn bilan, yelka balandligigacha ko'taring."],
+        ["Biceps gantel bilan", "Qo'l", 3, "12", "Tirsaklar qimirlamasin, sekin tushiring."],
+        ["Triceps blokda", "Qo'l", 3, "12", "Tirsaklar tanaga yopishgan holda pastga torting."],
+        ["Plank", "Press", 3, "45 soniya", "Tana to'g'ri chiziqda, qorin tarang."],
+        ["Yugurish yo'lakchasi", "Kardio", 1, "20 daqiqa", "Qadamni o'rtacha tezlikda boshlang, oxirida sekinlashtiring."],
+      ].map(([title, grp, sets, reps, note]) => ({ title, grp, sets, reps, note }));
+      const r = await db.from("exercises").insert(E);
+      return r.error ? bad(r.error.message) : ok();
+    }
+    case "backup": {
+      const dump = async (t: string) => (await db.from(t).select("*").limit(50000)).data || [];
+      const users = (await dump("users")).map(({ pass_hash, ...r }: any) => r);
+      const settings = (await dump("settings")).filter((x: any) => !String(x.key).startsWith("_"));
+      return NextResponse.json({ ok: true, data: {
+        date: new Date().toISOString(), users, payments: await dump("payments"), visits: await dump("visits"), orders: await dump("orders"),
+        notifications: await dump("notifications"), bot_users: await dump("bot_users"), products: await dump("products"), exercises: await dump("exercises"), settings,
+      } });
+    }
+    case "restart": {
+      if (b.confirm !== "RESTART") return bad("RESTART so'zini yozing");
+      if (!b.password || !(await bcrypt.compare(String(b.password), u.pass_hash))) return bad("Parol noto'g'ri", 403);
+      await db.from("lockers").update({ user_id: null, until: null, assigned_at: null }).not("num", "is", null);
+      await db.from("visits").delete().gt("id", 0);
+      await db.from("payments").delete().gt("id", 0);
+      await db.from("notifications").delete().gt("id", 0);
+      await db.from("orders").delete().not("id", "is", null);
+      await db.from("bot_users").delete().gt("tg_id", 0);
+      await db.from("users").delete().eq("role", "client");
+      if (b.products) await db.from("products").delete().not("id", "is", null);
       return ok();
     }
     case "setCard": {
@@ -118,38 +197,6 @@ export async function POST(req: Request) {
     case "releaseLocker":
       await db.from("lockers").update({ user_id: null, until: null, assigned_at: null }).eq("num", +b.num);
       return ok();
-    case "backup": {
-      const tables: Record<string, string> = { users: "id", visits: "id", payments: "id", orders: "id", notifications: "id", products: "id", bot_users: "tg_id", lockers: "num" };
-      const out: Record<string, any> = { app: "GOLD FIT", created: new Date().toISOString() };
-      for (const [t, k] of Object.entries(tables)) out[t] = await all(() => db.from(t).select("*").order(k));
-      out.users = out.users.map((x: any) => { const { pass_hash, ...r } = x; return r; });
-      const { data: st } = await db.from("settings").select("*");
-      out.settings = (st || []).filter((r: any) => !String(r.key).startsWith("_"));
-      return NextResponse.json({ ok: true, data: out });
-    }
-    case "restart": {
-      if (b.confirm !== "RESTART") return bad("Tasdiqlash so'zi noto'g'ri");
-      if (!(await bcrypt.compare(String(b.password || ""), u.pass_hash))) {
-        await new Promise((r) => setTimeout(r, 800));
-        return bad("Parol noto'g'ri");
-      }
-      const steps = [
-        db.from("visits").delete().gt("id", 0),
-        db.from("payments").delete().gt("id", 0),
-        db.from("notifications").delete().gt("id", 0),
-        db.from("orders").delete().not("id", "is", null),
-        db.from("lockers").update({ user_id: null, until: null, assigned_at: null }).not("num", "is", null),
-        db.from("users").delete().eq("role", "client"),
-        db.from("bot_users").delete().not("tg_id", "is", null),
-        ...(b.products ? [db.from("products").delete().not("id", "is", null)] : []),
-      ];
-      for (const q of steps) {
-        const { error } = await q;
-        if (error) return bad("Restart to'liq bajarilmadi: " + error.message);
-      }
-      clearSettingsCache();
-      return ok();
-    }
     case "setMenuButton": {
       await tg("setMyCommands", { commands: [
         { command: "start", description: "Boshlash" }, { command: "obuna", description: "Obuna holati" }, { command: "faollik", description: "Shu oydagi faollik" },
@@ -199,21 +246,30 @@ export async function POST(req: Request) {
     }
     case "notify": {
       if (!b.title) return bad("Sarlavha kerak");
-      const { data: cl } = await db.from("users").select("id,tg_id,paid_until,silent").eq("role", "client");
+      const { data: cl } = await db.from("users").select("id,tg_id,paid_until,silent,plan,trainer,checked_in_until").eq("role", "client");
       const all = cl || [];
-      const list = b.target === "all" ? all
-        : b.target === "unpaid" ? all.filter((x: any) => !x.paid_until || x.paid_until < today)
-        : all.filter((x: any) => x.id === b.target);
-      const rows = b.target === "all"
-        ? [{ user_id: null, title: b.title, body: b.body || "" }]
-        : list.map((x: any) => ({ user_id: x.id, title: b.title, body: b.body || "" }));
+      const nowT = Date.now();
+      const pick: Record<string, (x: any) => boolean> = {
+        all: () => true, botall: () => true,
+        unpaid: (x) => !x.paid_until || x.paid_until < today,
+        active: (x) => !!x.paid_until && x.paid_until >= today,
+        premium: (x) => x.plan === "premium",
+        trainer: (x) => !!x.trainer,
+        ingym: (x) => !!x.checked_in_until && +new Date(x.checked_in_until) > nowT,
+      };
+      const list = pick[b.target] ? all.filter(pick[b.target]) : all.filter((x: any) => x.id === b.target);
+      const global = b.target === "all" || b.target === "botall";
+      const rows = global ? [{ user_id: null, title: b.title, body: b.body || "" }] : list.map((x: any) => ({ user_id: x.id, title: b.title, body: b.body || "" }));
       if (rows.length) await db.from("notifications").insert(rows);
-      const targets = list.filter((x: any) => x.tg_id);
+      const ids = new Set<number>(list.filter((x: any) => x.tg_id).map((x: any) => Number(x.tg_id)));
+      if (b.target === "botall") (await db.from("bot_users").select("tg_id").eq("blocked", false)).data?.forEach((x: any) => ids.add(Number(x.tg_id)));
+      const silent = new Map(all.map((x: any) => [Number(x.tg_id), !!x.silent]));
+      const targets = [...ids];
       for (let i = 0; i < targets.length; i += 25)
-        await Promise.allSettled(targets.slice(i, i + 25).map((x: any) => tg("sendMessage", {
-          chat_id: x.tg_id, text: `🔔 ${b.title}\n${b.body || ""}`, disable_notification: !!b.silent || !!x.silent,
+        await Promise.allSettled(targets.slice(i, i + 25).map((id) => tg("sendMessage", {
+          chat_id: id, text: `🔔 ${b.title}\n${b.body || ""}`, disable_notification: !!b.silent || !!silent.get(id),
         })));
-      return ok();
+      return NextResponse.json({ ok: true, sent: targets.length });
     }
   }
   return bad("Noma'lum amal");

@@ -44,8 +44,6 @@ export async function POST(req: Request) {
     }).eq("id", u.id);
   }
 
-  if (t && u.role === "owner") await db.from("settings").upsert({ key: "_owner_tg", value: { id: t.id } });
-
   const res = NextResponse.json({ user: safe(u) });
   res.cookies.set("gf", makeToken(u.id), sessionCookie);
   return res;

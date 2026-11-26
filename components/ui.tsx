@@ -60,16 +60,20 @@ const P = {
   bag: "M5 8h14l-1 13H6z|M9 8V6a3 3 0 016 0v2",
   restart: "M4 12a8 8 0 108-8|M4 4v5h5",
   gift: "M3 9h18v4H3z|M5 13v8h14v-8|M12 9v12|M12 9c-3 0-5-4-2-5s3 3 2 5zm0 0c3 0 5-4 2-5s-3 3-2 5z",
-  back: "M15 5l-7 7 7 7",
-  volume: "M4 9v6h4l5 4V5L8 9z|M16 9a4 4 0 010 6|M18.5 6.5a8 8 0 010 11",
-  warn: "M12 3l10 18H2z|M12 10v5|M12 18h.01",
-  palette: "M12 3a9 9 0 100 18c1.6 0 2-1 1.5-2s0-2 1.5-2h2a3 3 0 003-3c0-6-4-11-8-11z|M7.5 11h.01|M10 7.5h.01|M14.5 7.5h.01",
 };
 export const Ic = ({ n, s }) => (
   <svg viewBox="0 0 24 24" width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     {(P[n] || "").split("|").map((d, i) => <path key={i} d={d} />)}
   </svg>
 );
+P.palette = "M12 3a9 9 0 100 18c1.5 0 2-1 1.5-2s0-2 1.5-2h2a3 3 0 003-3c0-6-4-11-8-11|M7.5 11h.01|M10 7.5h.01|M14.5 7.5h.01";
+P.volume = "M4 9v6h4l5 4V5L8 9z|M16.5 8.5a5 5 0 010 7|M19 6a8.5 8.5 0 010 12";
+P.warn = "M12 3l10 18H2z|M12 10v5|M12 18h.01";
+P.back = "M15 5l-7 7 7 7";
+P.enter = "M10 4h8a2 2 0 012 2v12a2 2 0 01-2 2h-8|M4 12h10|M10 8l4 4-4 4";
+P.exit = "M14 4H6a2 2 0 00-2 2v12a2 2 0 002 2h8|M10 12h10|M16 8l4 4-4 4";
+P.history = "M3 12a9 9 0 109-9 9 9 0 00-7 3.5L3 8|M3 3v5h5|M12 7v5l3 2";
+P.calendar = "M4 5h16v16H4z|M4 10h16|M8 3v4|M16 3v4";
 const PIC = { daily: "bolt", monthly: "medal", premium: "crown", trainer: "dumbbell" };
 export const PlanIc = ({ id, s }) => <Ic n={PIC[id] || "medal"} s={s} />;
 
@@ -243,35 +247,27 @@ export async function pkLogin() {
   return api("/api/passkey", { step: "authVerify", response: asr });
 }
 
-// ===== Tovush effektlari (fayl kerak emas, brauzerning o'zi chaladi) =====
-let _ac;
-export const soundOn = () => { try { return localStorage.getItem("gf_snd") !== "0"; } catch (e) { return true; } };
-export const setSound = (v) => { try { localStorage.setItem("gf_snd", v ? "1" : "0"); } catch (e) {} };
-export function sfx(kind = "ok") {
-  try { TG()?.HapticFeedback?.notificationOccurred(kind === "bad" ? "error" : "success"); } catch (e) {}
-  if (!soundOn()) return;
-  try {
-    _ac = _ac || new (window.AudioContext || window.webkitAudioContext)();
-    if (_ac.state === "suspended") _ac.resume();
-    const seq = { ok: [[660, 0.09], [880, 0.12]], door: [[523, 0.1], [659, 0.1], [784, 0.2]], notify: [[880, 0.1], [1175, 0.18]], badge: [[523, 0.09], [659, 0.09], [784, 0.09], [1047, 0.24]], bad: [[240, 0.16], [180, 0.22]] }[kind] || [];
-    let t = _ac.currentTime;
-    seq.forEach(([f, d]) => {
-      const o = _ac.createOscillator(), g = _ac.createGain();
-      o.type = kind === "bad" ? "sawtooth" : "sine";
-      o.frequency.value = f;
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.16, t + 0.012);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + d);
-      o.connect(g); g.connect(_ac.destination);
-      o.start(t); o.stop(t + d + 0.03);
-      t += d * 0.9;
-    });
-  } catch (e) {}
-}
-
 export function downloadJson(obj, file) {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" }));
   a.download = file;
   a.click();
+}
+
+// ===== Tovush (WebAudio, faylsiz) =====
+let AC = null;
+export const soundOn = () => { try { return localStorage.getItem("gf_snd") !== "0"; } catch (e) { return true; } };
+export const setSound = (v) => { try { localStorage.setItem("gf_snd", v ? "1" : "0"); } catch (e) {} };
+export function sfx(kind = "ok") {
+  if (!soundOn()) return;
+  try {
+    AC = AC || new (window.AudioContext || window.webkitAudioContext)();
+    const seq = { ok: [[660, 0], [880, 0.09]], bad: [[220, 0], [165, 0.12]], badge: [[523, 0], [659, 0.09], [784, 0.18], [1047, 0.27]] }[kind] || [];
+    seq.forEach(([f, t]) => {
+      const o = AC.createOscillator(), g = AC.createGain(), at = AC.currentTime + t;
+      o.type = "sine"; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, at); g.gain.exponentialRampToValueAtTime(0.18, at + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, at + 0.16);
+      o.connect(g); g.connect(AC.destination); o.start(at); o.stop(at + 0.18);
+    });
+  } catch (e) {}
 }

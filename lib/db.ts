@@ -18,8 +18,7 @@ export async function getSettings() {
   const s: Record<string, any> = {
     store_enabled: true, theme: "gold", season: "none",
     absent_days: 10, auto_block: true, checkin_hours: 3,
-    lockers_enabled: false, lockers_count: 100, remind_on: true, remind_days: 3, bot_welcome: "",
-    absent_msg_on: true, absent_msg_days: 7, summary_on: true,
+    lockers_enabled: false, absent_msg_on: true, absent_msg_days: 7, summary_on: true, lockers_count: 100, remind_on: true, remind_days: 3, bot_welcome: "",
   };
   // "_" bilan boshlanadigan kalitlar maxfiy (masalan bot tokeni), hech qachon qaytarilmaydi
   (data || []).forEach((r: any) => { if (!String(r.key).startsWith("_")) s[r.key] = r.value; });

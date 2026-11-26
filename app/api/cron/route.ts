@@ -11,7 +11,7 @@ export async function GET(req: Request) {
   const today = tzToday();
   const now = Date.now();
   await releaseExpired();
-  const res = { expired: 0, absent: 0, reminded: 0, missed: 0, summary: false };
+  const res: any = { expired: 0, absent: 0, reminded: 0, missed: 0, summary: false };
 
   // 1) To'lov muddati o'tganlarni bloklash
   const { data: ex } = await db.from("users").update({ blocked: true, block_reason: "expired" })
@@ -41,41 +41,38 @@ export async function GET(req: Request) {
     res.reminded++;
   }
 
-  // 4) "Sog'indik" xabari: aynan N kun kelmaganlarga bir marta
+  // 4) "Sizni sog'indik": uzoq kelmaganlarga (obunasi bor) bir marta xabar
   if (s.absent_msg_on !== false) {
-    const N = +s.absent_msg_days || 7;
-    const dayOf = (iso: string) => new Date(+new Date(iso) + 5 * 3600e3).toISOString().slice(0, 10);
-    const { data: act } = await db.from("users").select("id,first_name,tg_id,silent,last_visit,created_at")
+    const lim = new Date(now - (+s.absent_msg_days || 7) * 864e5).toISOString();
+    const { data: ab } = await db.from("users").select("id,tg_id,silent,first_name,last_visit,created_at,absent_msg_at")
       .eq("role", "client").eq("blocked", false).gte("paid_until", today);
-    for (const c of act || []) {
+    for (const c of ab || []) {
       const ref = c.last_visit || c.created_at;
-      if (!ref) continue;
-      const diff = Math.round((+new Date(today) - +new Date(dayOf(ref))) / 864e5);
-      if (diff !== N) continue;
-      const text = `${c.first_name || "Do'stim"}, ${N} kundan beri zalga kelmadingiz. Sizni sog'indik! Bugun mashq qilamizmi?`;
+      if (!ref || ref >= lim || (c.absent_msg_at && c.absent_msg_at >= ref)) continue;
+      const text = `${c.first_name || "Do'stim"}, sizni sog'indik! Obunangiz hali amal qilmoqda. Zalda ko'rishguncha!`;
       await db.from("notifications").insert({ user_id: c.id, title: "Sizni sog'indik", body: text });
       if (c.tg_id) await tg("sendMessage", { chat_id: c.tg_id, text: `💪 ${text}`, disable_notification: !!c.silent });
+      await db.from("users").update({ absent_msg_at: new Date().toISOString() }).eq("id", c.id);
       res.missed++;
     }
   }
 
-  // 5) Zal egasiga kunlik xulosa (Toshkent vaqti bilan 21:00 dan keyin, kuniga bir marta)
-  const hour = new Date(now + 5 * 3600e3).getUTCHours();
-  if (s.summary_on !== false && hour >= 21) {
-    const { data: last } = await db.from("settings").select("value").eq("key", "_summary_last").maybeSingle();
-    const { data: own } = await db.from("settings").select("value").eq("key", "_owner_tg").maybeSingle();
-    const chat = own?.value?.id;
-    if (chat && last?.value !== today) {
-      const start = `${today}T00:00:00+05:00`;
-      const [v, p, a, e] = await Promise.all([
-        db.from("visits").select("id", { count: "exact", head: true }).gte("at", start),
-        db.from("payments").select("amount").gte("paid_at", start),
-        db.from("users").select("id", { count: "exact", head: true }).eq("role", "client").eq("blocked", false).gte("paid_until", today),
-        db.from("users").select("id", { count: "exact", head: true }).eq("role", "client").gte("paid_until", today).lte("paid_until", addDays(today, 3)),
+  // 5) Kunlik xulosa: kechqurun 21:00 dan keyin zal egasiga (kuniga bir marta)
+  const hourT = new Date(now + 5 * 3600e3).getUTCHours();
+  if (s.summary_on !== false && hourT >= 21) {
+    const { data: done } = await db.from("settings").select("value").eq("key", "_summary_day").maybeSingle();
+    if (done?.value !== today) {
+      const from = `${today}T00:00:00+05:00`;
+      const [vi, pa, nw, ow] = await Promise.all([
+        db.from("visits").select("user_id").gte("at", from),
+        db.from("payments").select("amount").gte("paid_at", from),
+        db.from("users").select("id").eq("role", "client").gte("created_at", from),
+        db.from("users").select("tg_id").eq("role", "owner").not("tg_id", "is", null),
       ]);
-      const income = (p.data || []).reduce((x: number, r: any) => x + (r.amount || 0), 0);
-      await tg("sendMessage", { chat_id: chat, text: `📊 GOLD FIT: bugungi xulosa\n\n👥 Kelganlar: ${v.count || 0}\n💰 Tushum: ${income.toLocaleString("ru-RU")} so'm\n✅ Faol a'zolar: ${a.count || 0}\n⏳ 3 kunda tugaydi: ${e.count || 0}` });
-      await db.from("settings").upsert({ key: "_summary_last", value: today });
+      const income = (pa.data || []).reduce((a: number, x: any) => a + (x.amount || 0), 0);
+      const text = `📊 Bugungi xulosa (${today})\n\n👥 Kelganlar: ${new Set((vi.data || []).map((x: any) => x.user_id)).size}\n💰 Tushum: ${income.toLocaleString()} so'm\n🆕 Yangi a'zolar: ${nw.data?.length || 0}`;
+      for (const o of ow.data || []) await tg("sendMessage", { chat_id: o.tg_id, text });
+      await db.from("settings").upsert({ key: "_summary_day", value: today });
       res.summary = true;
     }
   }
