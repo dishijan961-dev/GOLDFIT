@@ -106,6 +106,9 @@ export async function POST(req: Request) {
       await db.from("lockers").update({ user_id: null, until: null, assigned_at: null }).eq("num", +b.num);
       return ok();
     case "setMenuButton": {
+      await tg("setMyCommands", { commands: [
+        { command: "start", description: "Boshlash" }, { command: "obuna", description: "Obuna holati" }, { command: "faollik", description: "Shu oydagi faollik" },
+        { command: "shkaf", description: "Shkaf raqami" }, { command: "reyting", description: "Oyning eng faollari" }, { command: "yordam", description: "Yordam" } ] });
       const r = await tg("setChatMenuButton", { menu_button: { type: "web_app", text: "GOLD FIT", web_app: { url: appUrl(req) } } });
       return r?.ok ? ok() : bad("Bot ulanmagan yoki Telegram rad etdi");
     }
@@ -136,6 +139,9 @@ export async function POST(req: Request) {
         { key: "bot_username", value: me.result.username },
       ]);
       clearBotCache();
+      await tg("setMyCommands", { commands: [
+        { command: "start", description: "Boshlash" }, { command: "obuna", description: "Obuna holati" }, { command: "faollik", description: "Shu oydagi faollik" },
+        { command: "shkaf", description: "Shkaf raqami" }, { command: "reyting", description: "Oyning eng faollari" }, { command: "yordam", description: "Yordam" } ] });
       await tg("setChatMenuButton", { menu_button: { type: "web_app", text: "GOLD FIT", web_app: { url } } });
       return ok();
     }

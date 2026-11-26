@@ -59,7 +59,10 @@ export default function Owner({ d, reload, th }) {
       {busy && <div className="topbar" />}
       <div className="row between" style={{ marginBottom: 8 }}>
         <div className="row"><img src="/logo.jpeg" alt="" width="40" height="40" style={{ borderRadius: "50%" }} /><h2 className="gold" style={{ margin: 0, letterSpacing: 3 }}>GOLD FIT</h2></div>
-        <Btn icon="logout" cls="ghost sm" onClick={async () => { await api("/api/me", { logout: true }); reload(); }}>Chiqish</Btn>
+        <div className="row" style={{ gap: 8 }}>
+          {isOwner && <Btn icon="sliders" cls="sm" onClick={() => { setTab("set"); window.scrollTo({ top: 0 }); }}>Sozlama</Btn>}
+          <Btn icon="logout" cls="ghost sm" onClick={async () => { await api("/api/me", { logout: true }); reload(); }}>{""}</Btn>
+        </div>
       </div>
       {th.banner && <div className="banner">{th.banner}</div>}
 
