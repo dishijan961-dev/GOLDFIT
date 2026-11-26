@@ -46,9 +46,9 @@ function Login({ onDone }) {
     setBusy(true);
     const r = await api("/api/login", { login: l, password: p, initData: TG()?.initData });
     setBusy(false);
-    r.ok ? onDone() : setErr(r.error || "Xatolik");
+    if (r.ok) { try { localStorage.removeItem("gf_out"); } catch (e) {} onDone(); } else setErr(r.error || "Xatolik");
   };
-  const face = async () => { setBusy(true); const r = await pkLogin(); setBusy(false); r.ok ? onDone() : setErr(r.error || "Xatolik"); };
+  const face = async () => { setBusy(true); const r = await pkLogin(); setBusy(false); if (r.ok) { try { localStorage.removeItem("gf_out"); } catch (e) {} onDone(); } else setErr(r.error || "Xatolik"); };
   return (
     <div className="center fade">
       <img src="/logo.jpeg" className="logo-top" alt="" />
@@ -71,13 +71,21 @@ export default function Page() {
     let r = await api("/api/me");
     if (!r.ok) r = await api("/api/me");
     // Telegram ichida: avval kirgan mijoz parolsiz avtomatik kiradi
-    if (r.ok && !r.user && TG()?.initData) {
+    let out = false;
+    try { out = localStorage.getItem("gf_out") === "1"; } catch (e) {}
+    if (r.ok && !r.user && TG()?.initData && !out) {
       const a = await api("/api/login", { initData: TG().initData });
       if (a.ok) r = await api("/api/me");
     }
     setD(r);
   };
   useEffect(() => {
+    // Chiqish bir zumda: ekran darhol yopiladi, server so'rovi fonda ketadi
+    bus.logout = () => {
+      try { localStorage.setItem("gf_out", "1"); } catch (e) {}
+      setD((p) => ({ ...p, user: null }));
+      try { fetch("/api/me", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ logout: true }), keepalive: true }); } catch (e) {}
+    };
     bus.toast = (t) => { setToast(String(t)); setTimeout(() => setToast(""), 3200); };
     TG()?.ready(); TG()?.expand();
     try { if (sessionStorage.getItem("gf_intro")) setIntro(false); } catch (e) {}

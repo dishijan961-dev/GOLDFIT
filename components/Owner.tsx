@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { PLANS, planOf, TRAINER_FEE, GYM_PLANS } from "@/lib/plans";
 import { THEMES, HOLIDAY_THEMES } from "@/lib/themes";
-import { TG, api, say, today, since, name, Ic, PlanIc, Btn, Switch, Head, In, Tabs, Stat, Pick, QrLive, downloadCsv, downloadJson, pkSupported, pkEnroll, sfx, soundOn, setSound } from "./ui";
+import { TG, api, bus, say, today, since, name, Ic, PlanIc, Btn, Switch, Head, In, Tabs, Stat, Pick, QrLive, downloadCsv, downloadJson, pkSupported, pkEnroll, sfx, soundOn, setSound } from "./ui";
 
 const Row = ({ title, sub, children }) => (
   <div className="row between" style={{ margin: "10px 0" }}><div><b>{title}</b>{sub && <div className="mut">{sub}</div>}</div>{children}</div>
@@ -84,7 +84,7 @@ export default function Owner({ d, reload, th }) {
         <div className="row"><img src="/logo.jpeg" alt="" width="40" height="40" style={{ borderRadius: "50%" }} /><h2 className="gold" style={{ margin: 0, letterSpacing: 3 }}>GOLD FIT</h2></div>
         <div className="row" style={{ gap: 8 }}>
           {isOwner && <Btn icon="sliders" cls="sm" onClick={() => { setSec(null); setTab("set"); window.scrollTo({ top: 0 }); }}>Sozlama</Btn>}
-          <Btn icon="logout" cls="ghost sm" onClick={async () => { await api("/api/me", { logout: true }); reload(); }}>{""}</Btn>
+          <Btn icon="logout" cls="ghost sm" onClick={() => bus.logout()}>{""}</Btn>
         </div>
       </div>
       {th.banner && <div className="banner">{th.banner}</div>}

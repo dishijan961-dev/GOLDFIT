@@ -14,7 +14,7 @@ export async function api(url, body) {
     return { ...d, ok: r.ok };
   } catch (e) { return { ok: false, error: "Server javob bermadi. Qayta urinib ko'ring" }; } finally { clearTimeout(tm); }
 }
-export const bus = { toast: null };
+export const bus = { toast: null, logout: () => {} };
 export const say = (t) => (bus.toast ? bus.toast(t) : alert(t));
 export const today = () => new Date(Date.now() + 5 * 3600e3).toISOString().slice(0, 10);
 export const since = (d) => (d ? Math.floor((Date.now() - new Date(d)) / 864e5) : null);

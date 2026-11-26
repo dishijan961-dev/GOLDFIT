@@ -2,7 +2,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { planOf } from "@/lib/plans";
-import { TG, api, say, today, name, Ic, PlanIc, Btn, Switch, Head, Tabs, Stat, boom, useCount, pkSupported, pkEnroll } from "./ui";
+import { TG, api, bus, say, today, name, Ic, PlanIc, Btn, Switch, Head, Tabs, Stat, boom, useCount, pkSupported, pkEnroll } from "./ui";
 
 function VipCard({ u, active }) {
   const P = planOf(u.plan), ref = useRef(null);
@@ -153,7 +153,7 @@ export default function Client({ d, reload, th }) {
     <div className="wrap fade">
       <div className="row between" style={{ marginBottom: 6 }}>
         <div className="row"><img src="/logo.jpeg" alt="" width="40" height="40" style={{ borderRadius: "50%" }} /><h2 className="gold" style={{ margin: 0, letterSpacing: 3 }}>GOLD FIT</h2></div>
-        <Btn icon="logout" cls="ghost sm" onClick={async () => { await api("/api/me", { logout: true }); reload(); }}>Chiqish</Btn>
+        <Btn icon="logout" cls="ghost sm" onClick={() => bus.logout()}>Chiqish</Btn>
       </div>
       {tab === "home" && th.banner && <div className="banner">{th.banner}</div>}
       {tab === "home" && (
