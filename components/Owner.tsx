@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { PLANS, planOf } from "@/lib/plans";
 import { THEMES, HOLIDAY_THEMES } from "@/lib/themes";
-import { TG, api, say, today, since, name, Ic, PlanIc, Btn, Switch, Head, In, Tabs, Stat, Pick, QrLive, downloadCsv, pkSupported, pkEnroll } from "./ui";
+import { TG, api, say, today, since, name, Ic, PlanIc, Btn, Switch, Head, In, Tabs, Stat, Pick, QrLive, downloadCsv, downloadJson, pkSupported, pkEnroll, sfx, soundOn, setSound } from "./ui";
 
 const Row = ({ title, sub, children }) => (
   <div className="row between" style={{ margin: "10px 0" }}><div><b>{title}</b>{sub && <div className="mut">{sub}</div>}</div>{children}</div>
@@ -15,16 +15,18 @@ export default function Owner({ d, reload, th }) {
   const [f, setF] = useState({}), [pf, setPf] = useState({}), [nf, setNf] = useState({ target: "all" }), [cf, setCf] = useState({}), [bf, setBf] = useState({});
   const [payDays, setPayDays] = useState(0), [showAll, setShowAll] = useState(false), [showForm, setShowForm] = useState(false), [q, setQ] = useState("");
   const [busy, setBusy] = useState(false), [sup, setSup] = useState(false);
+  const [sec, setSec] = useState(null), [bk, setBk] = useState(false), [rf, setRf] = useState({}), [snd, setSnd] = useState(true);
   const s = d.settings, isOwner = d.user.role === "owner";
   const ld = async () => setO(await api("/api/owner"));
-  useEffect(() => { ld(); setSup(pkSupported()); }, []);
+  useEffect(() => { ld(); setSup(pkSupported()); setSnd(soundOn()); }, []);
   const act = async (body, msg) => {
     setBusy(true);
     const r = await api("/api/owner", body);
     setBusy(false);
     say(r.ok ? msg || "Saqlandi" : r.error);
+    sfx(r.ok ? "ok" : "bad");
     await ld();
-    if (r.ok && ["setSetting", "changeCreds"].includes(body.action)) reload();
+    if (r.ok && ["setSetting", "changeCreds", "restart"].includes(body.action)) reload();
     return r;
   };
   const set = (key, value) => act({ action: "setSetting", key, value }, "Sozlama saqlandi");
@@ -60,7 +62,7 @@ export default function Owner({ d, reload, th }) {
       <div className="row between" style={{ marginBottom: 8 }}>
         <div className="row"><img src="/logo.jpeg" alt="" width="40" height="40" style={{ borderRadius: "50%" }} /><h2 className="gold" style={{ margin: 0, letterSpacing: 3 }}>GOLD FIT</h2></div>
         <div className="row" style={{ gap: 8 }}>
-          {isOwner && <Btn icon="sliders" cls="sm" onClick={() => { setTab("set"); window.scrollTo({ top: 0 }); }}>Sozlama</Btn>}
+          {isOwner && <Btn icon="sliders" cls="sm" onClick={() => { setSec(null); setTab("set"); window.scrollTo({ top: 0 }); }}>Sozlama</Btn>}
           <Btn icon="logout" cls="ghost sm" onClick={async () => { await api("/api/me", { logout: true }); reload(); }}>{""}</Btn>
         </div>
       </div>
@@ -82,6 +84,16 @@ export default function Owner({ d, reload, th }) {
                 <div className="bar2" key={p.id}><span className="t"><PlanIc id={p.id} />{p.name}</span><span className="b"><i style={{ width: (actives.length ? (n / actives.length) * 100 : 0) + "%" }} /></span><b>{n}</b></div>
               ); })}
             </div>
+          </div>
+          <div className="card">
+            <div className="row" style={{ marginBottom: 12 }}><Ic n="flame" s={22} /><b>Gavjum soatlar (shu oy)</b></div>
+            <div className="hours">
+              {Array.from({ length: 18 }, (_, i) => i + 6).map((h) => {
+                const n = o.hours?.[h] || 0, mx = Math.max(1, ...(o.hours || [1]));
+                return <div key={h} className="hb"><i style={{ height: Math.max(4, (n / mx) * 88) + "%" }} title={n + " ta"} /><span>{h}</span></div>;
+              })}
+            </div>
+            <p className="mut" style={{ margin: "8px 0 0" }}>Soat bo'yicha kelishlar soni. Eng baland ustun: eng gavjum vaqt.</p>
           </div>
           <div className="card">
             <div className="row" style={{ marginBottom: 10 }}><Ic n="clock" s={22} /><b>3 kunda obunasi tugaydi ({soon.length})</b></div>
@@ -290,6 +302,11 @@ export default function Owner({ d, reload, th }) {
             <div className="mut">Necha kun oldin eslatilsin</div>
             <input type="number" defaultValue={s.remind_days} onBlur={(x) => set("remind_days", +x.target.value || 3)} />
           </div>
+          <div className="card" style={{ borderColor: "#ff3b3b66" }}>
+            <b>Zaxira va restart</b>
+            <p className="mut">Hamma ma'lumotni o'chirib, ilovani yangidan boshlash. Avval zaxira nusxa olinadi.</p>
+            <Btn icon="warn" cls="red" onClick={() => { setSec("danger"); setTab("set"); window.scrollTo({ top: 0 }); }}>Zaxira va restart</Btn>
+          </div>
           <div className="card">
             <b>Bot foydalanuvchilari ({o.botUsers.length})</b>
             {o.botUsers.map((b) => (
@@ -304,38 +321,132 @@ export default function Owner({ d, reload, th }) {
 
       {cur === "set" && isOwner && (
         <div className="fade">
-          <Head icon="sliders" title="Sozlamalar" sub="Super admin boshqaruvi" />
-          <div className="card">
-            <b>Ilova dizayni</b>
-            <select value={s.theme} onChange={(x) => set("theme", x.target.value)} style={{ marginTop: 8 }}>
-              <option value="auto">Avtomatik (bayramga qarab)</option>
-              <optgroup label="Asosiy dizaynlar">{THEMES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>
-              <optgroup label="Bayram shablonlari">{HOLIDAY_THEMES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>
-            </select>
-            <p className="mut">Hozir: {th.name}. Ramazon va hayit sanalari taxminiy, o'zgarsa qo'lda tanlang.</p>
-            <select value={s.season} onChange={(x) => set("season", x.target.value)}>
-              <option value="none">Fasl effekti yo'q</option><option value="winter">Qish (qor)</option><option value="autumn">Kuz (barglar)</option><option value="spring">Bahor (gul barglari)</option>
-            </select>
-          </div>
-          <div className="card">
-            <b>Avtomatik bloklash</b>
-            <Row title="Kelmaganlarni bloklash"><Switch on={s.auto_block} onClick={() => set("auto_block", !s.auto_block)} /></Row>
-            <div className="mut">Necha kun kelmasa bloklansin</div>
-            <input type="number" defaultValue={s.absent_days} onBlur={(x) => set("absent_days", +x.target.value || 10)} />
-            <div className="mut">QR skanerlangach do'kon va shkaf necha soat ochiq</div>
-            <input type="number" defaultValue={s.checkin_hours} onBlur={(x) => set("checkin_hours", +x.target.value || 3)} />
-          </div>
-          <div className="card">
-            <b>Eshik / turniket</b>
-            <p className="mut">Kontroller karta raqamini <code>POST /api/door</code> ga yuboradi (header: <code>x-door-key</code>, body: {'{"card":"..."}'}). Javobda <code>open:true</code> bo'lsa eshik ochiladi. Render'da <code>DOOR_KEY</code> o'zgaruvchisi kerak.</p>
-          </div>
-          <div className="card">
-            <b>Xavfsizlik</b>
-            {sup && <Row title="Face ID / barmoq izi" sub="Shu qurilmada parolsiz kirish"><Btn icon="finger" cls="sm" onClick={async () => { const r = await pkEnroll(); say(r.ok ? "Yoqildi" : r.error); }}>Yoqish</Btn></Row>}
-            <div className="mut" style={{ marginTop: 10 }}>Kirish ma'lumotlarini o'zgartirish</div>
-            <In f={cf} setF={setCf} k="login" ph="Yangi login" /><In f={cf} setF={setCf} k="password" ph="Yangi parol (kamida 6 belgi)" type="password" />
-            <Btn icon="lock" onClick={async () => { const r = await act({ action: "changeCreds", ...cf }); if (r.ok) setCf({}); }}>Saqlash</Btn>
-          </div>
+          {!sec && (
+            <>
+              <Head icon="sliders" title="Super admin" sub="Har bir boshqaruv alohida bo'limda" />
+              <div className="hubgrid">
+                {[
+                  ["design", "palette", "Dizayn", "Rang va bayram shablonlari"],
+                  ["access", "clock", "Avto-blok va vaqt", `${s.absent_days} kun · ${s.checkin_hours} soat`],
+                  ["lockers", "locker", "Shkaflar", s.lockers_enabled ? "Yoqilgan" : "O'chiq"],
+                  ["door", "door", "Eshik va kartalar", "Turniket ulanishi"],
+                  ["bot", "bot", "Bot sozlamalari", s.bot_username ? "@" + s.bot_username : "Ulanmagan"],
+                  ["alerts", "volume", "Xabar va ovoz", "Eslatma, xulosa, tovush"],
+                  ["security", "shield", "Xavfsizlik", "Face ID, login, parol"],
+                  ["danger", "warn", "Zaxira va restart", "Xavfli zona"],
+                ].map(([id, ic, t, sub]) => (
+                  <button key={id} className={"hub" + (id === "danger" ? " danger" : "")} onClick={() => (id === "lockers" || id === "bot" ? setTab(id) : setSec(id))}>
+                    <div className="hi"><Ic n={ic} /></div><b>{t}</b><span className="mut">{sub}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+          {sec && <div style={{ marginBottom: 12 }}><Btn icon="back" cls="ghost sm" onClick={() => setSec(null)}>Orqaga</Btn></div>}
+
+          {sec === "design" && (
+            <>
+              <Head icon="palette" title="Dizayn" sub="Ilova ko'rinishi" />
+              <div className="card">
+                <b>Ilova dizayni</b>
+                <select value={s.theme} onChange={(x) => set("theme", x.target.value)} style={{ marginTop: 8 }}>
+                  <option value="auto">Avtomatik (bayramga qarab)</option>
+                  <optgroup label="Asosiy dizaynlar">{THEMES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>
+                  <optgroup label="Bayram shablonlari">{HOLIDAY_THEMES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>
+                </select>
+                <p className="mut">Hozir: {th.name}. Ramazon va hayit sanalari taxminiy, o'zgarsa qo'lda tanlang.</p>
+                <select value={s.season} onChange={(x) => set("season", x.target.value)}>
+                  <option value="none">Fasl effekti yo'q</option><option value="winter">Qish (qor)</option><option value="autumn">Kuz (barglar)</option><option value="spring">Bahor (gul barglari)</option>
+                </select>
+              </div>
+            </>
+          )}
+
+          {sec === "access" && (
+            <>
+              <Head icon="clock" title="Avto-blok va vaqt" sub="Kelmaganlar va zal vaqti" />
+              <div className="card">
+                <b>Avtomatik bloklash</b>
+                <Row title="Kelmaganlarni bloklash"><Switch on={s.auto_block} onClick={() => set("auto_block", !s.auto_block)} /></Row>
+                <div className="mut">Necha kun kelmasa bloklansin</div>
+                <input type="number" defaultValue={s.absent_days} onBlur={(x) => set("absent_days", +x.target.value || 10)} />
+                <div className="mut">QR skanerlangach do'kon va shkaf necha soat ochiq</div>
+                <input type="number" defaultValue={s.checkin_hours} onBlur={(x) => set("checkin_hours", +x.target.value || 3)} />
+              </div>
+            </>
+          )}
+
+          {sec === "door" && (
+            <>
+              <Head icon="door" title="Eshik va kartalar" sub="Turniket ulanishi" />
+              <div className="card">
+                <b>Eshik / turniket</b>
+                <p className="mut">Kontroller karta raqamini <code>POST /api/door</code> ga yuboradi (header: <code>x-door-key</code>, body: {'{"card":"..."}'}). Javobda <code>open:true</code> bo'lsa eshik ochiladi. Render'da <code>DOOR_KEY</code> o'zgaruvchisi kerak.</p>
+                <p className="mut">Braslet raqamini mijozga "Jadval" bo'limida biriktirasiz.</p>
+                <Btn icon="table" cls="dark" onClick={() => setTab("table")}>Jadvalga o'tish</Btn>
+              </div>
+            </>
+          )}
+
+          {sec === "alerts" && (
+            <>
+              <Head icon="volume" title="Xabar va ovoz" sub="Avtomatik eslatmalar va tovush" />
+              <div className="card">
+                <b>Avtomatik xabarlar</b>
+                <Row title="Obuna tugashi eslatmasi" sub="Bot mijozga o'zi yozadi"><Switch on={s.remind_on !== false} onClick={() => set("remind_on", !(s.remind_on !== false))} /></Row>
+                <div className="mut">Necha kun oldin eslatilsin</div>
+                <input type="number" defaultValue={s.remind_days} onBlur={(x) => set("remind_days", +x.target.value || 3)} />
+                <Row title="Sizni sog'indik xabari" sub="Uzoq kelmaganlarga bir marta yuboriladi"><Switch on={s.absent_msg_on !== false} onClick={() => set("absent_msg_on", !(s.absent_msg_on !== false))} /></Row>
+                <div className="mut">Necha kun kelmasa yuborilsin</div>
+                <input type="number" defaultValue={s.absent_msg_days} onBlur={(x) => set("absent_msg_days", +x.target.value || 7)} />
+                <Row title="Kunlik xulosa" sub="Kechqurun 21:00 dan keyin sizga Telegramda keladi"><Switch on={s.summary_on !== false} onClick={() => set("summary_on", !(s.summary_on !== false))} /></Row>
+                {s.summary_on !== false && !o.ownerTg && <p className="bad">Xulosa kelishi uchun mini appga bir marta Telegram ichidan kiring.</p>}
+                <p className="mut">Bu xabarlar cron ishlaganda yuboriladi. Cron manzili: <code>/api/cron?key=CRON_SECRET</code> (soatiga bir marta chaqirilsa yetarli).</p>
+              </div>
+              <div className="card">
+                <b>Tovush</b>
+                <Row title="Ilova tovushi" sub="Muvaffaqiyat va xato tovushlari (shu qurilmada)"><Switch on={snd} onClick={() => { const v = !snd; setSound(v); setSnd(v); if (v) sfx("badge"); }} /></Row>
+                <Btn icon="volume" cls="dark sm" onClick={() => sfx("badge")}>Sinab ko'rish</Btn>
+              </div>
+            </>
+          )}
+
+          {sec === "security" && (
+            <>
+              <Head icon="shield" title="Xavfsizlik" sub="Kirish usullari" />
+              <div className="card">
+                <b>Xavfsizlik</b>
+                {sup && <Row title="Face ID / barmoq izi" sub="Shu qurilmada parolsiz kirish"><Btn icon="finger" cls="sm" onClick={async () => { const r = await pkEnroll(); say(r.ok ? "Yoqildi" : r.error); }}>Yoqish</Btn></Row>}
+                <div className="mut" style={{ marginTop: 10 }}>Kirish ma'lumotlarini o'zgartirish</div>
+                <In f={cf} setF={setCf} k="login" ph="Yangi login" /><In f={cf} setF={setCf} k="password" ph="Yangi parol (kamida 6 belgi)" type="password" />
+                <Btn icon="lock" onClick={async () => { const r = await act({ action: "changeCreds", ...cf }); if (r.ok) setCf({}); }}>Saqlash</Btn>
+              </div>
+            </>
+          )}
+
+          {sec === "danger" && (
+            <>
+              <Head icon="warn" title="Zaxira va restart" sub="Xavfli zona" />
+              <div className="dz">
+                <b>Restart nima qiladi?</b>
+                <p className="mut">Ilova yangi o'rnatilgandek bo'ladi. <b>O'chadi:</b> barcha mijozlar, to'lovlar, davomat, buyurtmalar, xabarlar, bot foydalanuvchilari va shkaf band qilishlari. <b>Qoladi:</b> sizning hisobingiz, treynerlar, tariflar, sozlamalar va bot ulanishi. Qaytarib bo'lmaydi.</p>
+                <div className="step"><i>1</i><b>Zaxira nusxa oling</b></div>
+                <Btn icon="download" cls="dark" onClick={async () => { const r = await api("/api/owner", { action: "backup" }); if (r.ok) { downloadJson(r.data, `goldfit-zaxira-${today()}.json`); setBk(true); say("Zaxira yuklandi"); sfx("ok"); } else say(r.error); }}>{bk ? "Zaxira olindi. Yana olish" : "Zaxira faylini yuklab olish"}</Btn>
+                <p className="mut">Telegram ichida fayl yuklanmasa, saytni brauzerda oching.</p>
+                <div className="step"><i>2</i><b>Tasdiqlang</b></div>
+                <Row title="Do'kon mahsulotlari ham o'chsin"><Switch on={!!rf.products} onClick={() => setRf({ ...rf, products: !rf.products })} /></Row>
+                <In f={rf} setF={setRf} k="confirm" ph="RESTART so'zini yozing" />
+                <In f={rf} setF={setRf} k="password" ph="Parolingiz" type="password" />
+                <div className="step"><i>3</i><b>Restart</b></div>
+                <Btn icon="restart" cls="red" disabled={!bk || rf.confirm !== "RESTART" || !rf.password} onClick={async () => {
+                  if (!confirm("Hamma ma'lumot o'chadi. Davom etamizmi?")) return;
+                  const r = await act({ action: "restart", ...rf }, "Restart bajarildi");
+                  if (r.ok) { setRf({}); setBk(false); setSec(null); }
+                }}>Hamma ma'lumotni o'chirish</Btn>
+                {!bk && <p className="mut">Tugma zaxira olingandan keyin ochiladi.</p>}
+              </div>
+            </>
+          )}
         </div>
       )}
       <Tabs tabs={T} tab={cur} setTab={setTab} />

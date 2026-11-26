@@ -16,29 +16,6 @@ function Splash() {
   );
 }
 
-// Mini app ochilganda logotip videosi (bir sessiyada bir marta)
-function Intro({ onDone }) {
-  const v = useRef(null);
-  const [out, setOut] = useState(false), [skip, setSkip] = useState(false);
-  const end = () => {
-    setOut(true);
-    try { sessionStorage.setItem("gf_intro", "1"); } catch (e) {}
-    setTimeout(onDone, 700);
-  };
-  useEffect(() => {
-    const t = setTimeout(end, 9500), t2 = setTimeout(() => setSkip(true), 800);
-    const p = v.current?.play?.();
-    if (p?.catch) p.catch(end);
-    return () => { clearTimeout(t); clearTimeout(t2); };
-  }, []);
-  return (
-    <div className={"intro" + (out ? " out" : "")} onClick={end}>
-      <video ref={v} src="/intro.mp4" poster="/logo.jpeg" muted playsInline autoPlay preload="auto" onEnded={end} onError={end} />
-      {skip && <button className="skip" onClick={end}>O'tkazish</button>}
-    </div>
-  );
-}
-
 function Login({ onDone }) {
   const [l, setL] = useState(""), [p, setP] = useState(""), [err, setErr] = useState(""), [busy, setBusy] = useState(false), [bio, setBio] = useState(false);
   useEffect(() => { try { setBio(pkSupported() && !!localStorage.getItem("gf_pk")); } catch (e) {} }, []);
@@ -64,7 +41,6 @@ function Login({ onDone }) {
 }
 
 export default function Page() {
-  const [intro, setIntro] = useState(true);
   const [d, setD] = useState(null);
   const [toast, setToast] = useState("");
   const load = async () => {
@@ -80,7 +56,6 @@ export default function Page() {
   useEffect(() => {
     bus.toast = (t) => { setToast(String(t)); setTimeout(() => setToast(""), 3200); };
     TG()?.ready(); TG()?.expand();
-    try { if (sessionStorage.getItem("gf_intro")) setIntro(false); } catch (e) {}
     load();
     return () => { bus.toast = null; };
   }, []);
@@ -94,7 +69,6 @@ export default function Page() {
   const icon = { winter: "❄", autumn: "🍂", spring: "🌸" }[s?.season] || th.fall;
   return (
     <>
-      {intro && <Intro onDone={() => setIntro(false)} />}
       {!d ? <Splash /> : (
         <>
           {icon && <Fall icon={icon} />}

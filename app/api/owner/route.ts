@@ -9,7 +9,19 @@ import { encrypt, clearBotCache, getBotToken, webhookSecret, appUrl } from "@/li
 
 const bad = (error: string, status = 400) => NextResponse.json({ error }, { status });
 const ok = () => NextResponse.json({ ok: true });
-const SETTING_KEYS = ["store_enabled", "theme", "season", "absent_days", "auto_block", "checkin_hours", "lockers_enabled", "lockers_count", "remind_on", "remind_days", "bot_welcome"];
+const SETTING_KEYS = ["store_enabled", "theme", "season", "absent_days", "auto_block", "checkin_hours", "lockers_enabled", "lockers_count", "remind_on", "remind_days", "bot_welcome", "absent_msg_on", "absent_msg_days", "summary_on"];
+
+// Supabase bir so'rovda 1000 qatordan ortiq bermaydi: sahifalab o'qiymiz
+async function all(build: () => any) {
+  const out: any[] = [];
+  for (let i = 0; i < 100; i++) {
+    const { data } = await build().range(i * 1000, i * 1000 + 999);
+    if (!data?.length) break;
+    out.push(...data);
+    if (data.length < 1000) break;
+  }
+  return out;
+}
 
 export async function GET(req: Request) {
   const u = await getUser();
@@ -22,18 +34,19 @@ export async function GET(req: Request) {
     db.from("products").select("*").order("created_at", { ascending: false }),
     db.from("visits").select("at, users(first_name,last_name)").gte("at", start).order("at", { ascending: false }),
     db.from("bot_users").select("*").order("created_at", { ascending: false }),
-    db.from("visits").select("user_id").gte("at", mstart),
-    db.from("payments").select("user_id, amount").gte("paid_at", mstart),
+    all(() => db.from("visits").select("user_id, at").gte("at", mstart).order("id")).then((data) => ({ data })),
+    all(() => db.from("payments").select("user_id, amount").gte("paid_at", mstart).order("id")).then((data) => ({ data })),
     db.from("orders").select("id, total, items, created_at, users(first_name,last_name,phone)").order("created_at", { ascending: false }).limit(100),
     db.from("lockers").select("num, user_id, until, users(first_name,last_name)").order("num"),
   ]);
-  const monthVisits: Record<string, number> = {}, paidMonth: Record<string, number> = {};
-  (mv.data || []).forEach((x: any) => { monthVisits[x.user_id] = (monthVisits[x.user_id] || 0) + 1; });
+  const monthVisits: Record<string, number> = {}, paidMonth: Record<string, number> = {}, hours: number[] = Array(24).fill(0);
+  (mv.data || []).forEach((x: any) => { monthVisits[x.user_id] = (monthVisits[x.user_id] || 0) + 1; hours[new Date(+new Date(x.at) + 5 * 3600e3).getUTCHours()]++; });
+  const { data: ot } = await db.from("settings").select("value").eq("key", "_owner_tg").maybeSingle();
   (mp.data || []).forEach((x: any) => { paidMonth[x.user_id] = (paidMonth[x.user_id] || 0) + (x.amount || 0); });
   const income = (mp.data || []).reduce((a: number, x: any) => a + (x.amount || 0), 0);
   const strip = (x: any) => { const { pass_hash, ...r } = x; return r; };
   return NextResponse.json({
-    clients: (c.data || []).map(strip), products: p.data || [], visits: v.data || [], botUsers: b.data || [], monthVisits, paidMonth, income, orders: od.data || [], lockers: lk.data || [],
+    clients: (c.data || []).map(strip), products: p.data || [], visits: v.data || [], botUsers: b.data || [], monthVisits, paidMonth, income, hours, ownerTg: !!ot, orders: od.data || [], lockers: lk.data || [],
     displayUrl: u.role === "owner" && process.env.DISPLAY_KEY ? `${appUrl(req)}/display?key=${process.env.DISPLAY_KEY}` : null,
   });
 }
@@ -105,6 +118,38 @@ export async function POST(req: Request) {
     case "releaseLocker":
       await db.from("lockers").update({ user_id: null, until: null, assigned_at: null }).eq("num", +b.num);
       return ok();
+    case "backup": {
+      const tables: Record<string, string> = { users: "id", visits: "id", payments: "id", orders: "id", notifications: "id", products: "id", bot_users: "tg_id", lockers: "num" };
+      const out: Record<string, any> = { app: "GOLD FIT", created: new Date().toISOString() };
+      for (const [t, k] of Object.entries(tables)) out[t] = await all(() => db.from(t).select("*").order(k));
+      out.users = out.users.map((x: any) => { const { pass_hash, ...r } = x; return r; });
+      const { data: st } = await db.from("settings").select("*");
+      out.settings = (st || []).filter((r: any) => !String(r.key).startsWith("_"));
+      return NextResponse.json({ ok: true, data: out });
+    }
+    case "restart": {
+      if (b.confirm !== "RESTART") return bad("Tasdiqlash so'zi noto'g'ri");
+      if (!(await bcrypt.compare(String(b.password || ""), u.pass_hash))) {
+        await new Promise((r) => setTimeout(r, 800));
+        return bad("Parol noto'g'ri");
+      }
+      const steps = [
+        db.from("visits").delete().gt("id", 0),
+        db.from("payments").delete().gt("id", 0),
+        db.from("notifications").delete().gt("id", 0),
+        db.from("orders").delete().not("id", "is", null),
+        db.from("lockers").update({ user_id: null, until: null, assigned_at: null }).not("num", "is", null),
+        db.from("users").delete().eq("role", "client"),
+        db.from("bot_users").delete().not("tg_id", "is", null),
+        ...(b.products ? [db.from("products").delete().not("id", "is", null)] : []),
+      ];
+      for (const q of steps) {
+        const { error } = await q;
+        if (error) return bad("Restart to'liq bajarilmadi: " + error.message);
+      }
+      clearSettingsCache();
+      return ok();
+    }
     case "setMenuButton": {
       await tg("setMyCommands", { commands: [
         { command: "start", description: "Boshlash" }, { command: "obuna", description: "Obuna holati" }, { command: "faollik", description: "Shu oydagi faollik" },

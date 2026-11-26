@@ -2,7 +2,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { planOf } from "@/lib/plans";
-import { TG, api, say, today, name, Ic, PlanIc, Btn, Switch, Head, Tabs, Stat, boom, useCount, pkSupported, pkEnroll } from "./ui";
+import { TG, api, say, today, name, Ic, PlanIc, Btn, Switch, Head, Tabs, Stat, boom, useCount, pkSupported, pkEnroll, sfx, soundOn, setSound } from "./ui";
 
 function VipCard({ u, active }) {
   const P = planOf(u.plan), ref = useRef(null);
@@ -16,7 +16,7 @@ function VipCard({ u, active }) {
   };
   return (
     <>
-      <div ref={ref} className={"vip " + P.id + (active ? "" : " dead")} onPointerMove={mv} onPointerLeave={() => (ref.current.style.transform = "")} onClick={boom}>
+      <div ref={ref} className={"vip " + P.id + (active ? "" : " dead")} onPointerMove={mv} onPointerLeave={() => (ref.current.style.transform = "")} onClick={() => boom()}>
         <div className="vip-top"><img src="/logo.jpeg" alt="" /><span className="plan-chip"><PlanIc id={P.id} />{P.name}</span></div>
         <div className="vip-mid">
           <div><div className="vip-name">{name(u)}</div><div className="vip-sub">{u.tg_username ? "@" + u.tg_username : u.phone}</div></div>
@@ -47,6 +47,42 @@ function Locker({ d, inGym }) {
     <div className="card row" style={{ gap: 14 }}>
       <div className="head" style={{ margin: 0 }}><div className="hi"><Ic n="locker" /></div></div>
       <div className="mut" style={{ flex: 1 }}>{inGym ? "Hozir bo'sh shkaf qolmadi. Administratorga murojaat qiling." : "QR kodni skanerlasangiz, bo'sh shkaf raqami avtomatik beriladi."}</div>
+    </div>
+  );
+}
+
+const LEVELS = [["Boshlovchi", 0, "dumbbell"], ["Bronza", 10, "medal"], ["Kumush", 30, "medal"], ["Oltin", 60, "trophy"], ["Legenda", 100, "crown"]];
+
+function Level({ st }) {
+  const t = st?.total || 0, sk = st?.streak || 0, mo = st?.month || 0;
+  let i = 0;
+  LEVELS.forEach((l, k) => { if (t >= l[1]) i = k; });
+  const cur = LEVELS[i], nx = LEVELS[i + 1];
+  const pct = nx ? Math.min(100, ((t - cur[1]) / (nx[1] - cur[1])) * 100) : 100;
+  const B = [["Birinchi qadam", t >= 1, "bolt"], ["7 kun seriya", sk >= 7, "flame"], ["Oyda 12 kun", mo >= 12, "check"], ["50 tashrif", t >= 50, "medal"], ["30 kun seriya", sk >= 30, "crown"]];
+  return (
+    <div className="card">
+      <div className="lvl">
+        <div className="li"><Ic n={cur[2]} s={28} /></div>
+        <div style={{ flex: 1 }}>
+          <div className="mut">Sizning darajangiz</div>
+          <b style={{ fontSize: 20 }} className="gold">{cur[0]}</b>
+          <div className="pb"><i style={{ width: pct + "%" }} /></div>
+          <div className="mut" style={{ marginTop: 6 }}>{nx ? `${nx[0]} darajasigacha yana ${nx[1] - t} ta tashrif` : "Eng yuqori daraja!"}</div>
+        </div>
+      </div>
+      <div className="chips">{B.map(([n, ok, ic]) => <span key={n} className={"chip" + (ok ? "" : " lock")}><Ic n={ic} />{n}</span>)}</div>
+    </div>
+  );
+}
+
+function SoundSwitch() {
+  const [on, setOn] = useState(true);
+  useEffect(() => setOn(soundOn()), []);
+  return (
+    <div className="card row between">
+      <div><b>Ilova tovushi</b><div className="mut">Kirish, xabar va yutuq tovushlari</div></div>
+      <Switch on={on} onClick={() => { const v = !on; setSound(v); setOn(v); if (v) sfx("badge"); }} />
     </div>
   );
 }
@@ -92,7 +128,7 @@ function Store({ reload }) {
     const items = Object.entries(cart).filter(([, q]) => q > 0).map(([id, qty]) => ({ id, qty }));
     const r = await api("/api/store", { items });
     say(r.ok ? "Buyurtma qabul qilindi" : r.error);
-    if (r.ok) { setCart({}); ld(); boom(); }
+    if (r.ok) { setCart({}); ld(); boom(); sfx("ok"); }
   };
   return (
     <>
@@ -123,10 +159,19 @@ export default function Client({ d, reload, th }) {
   const scan = () => TG()?.showScanQrPopup
     ? TG().showScanQrPopup({ text: "Zaldagi QR kodni skanerlang" }, (t) => {
         TG().closeScanQrPopup();
-        api("/api/checkin", { qr: t }).then((r) => { say(r.ok ? (r.locker ? `Xush kelibsiz! Shkafingiz: №${r.locker}` : "Xush kelibsiz!") : r.error); if (r.ok) boom(); reload(); });
+        api("/api/checkin", { qr: t }).then((r) => { say(r.ok ? (r.locker ? `Xush kelibsiz! Shkafingiz: №${r.locker}` : "Xush kelibsiz!") : r.error); if (r.ok) { boom(); sfx("door"); } else sfx("bad"); reload(); });
         return true;
       })
     : say("Skaner faqat Telegram ichida ishlaydi");
+  const last = useRef(d.notes?.[0]?.id);
+  useEffect(() => {
+    const t = setInterval(async () => {
+      const r = await api("/api/me");
+      const n = r.notes?.[0];
+      if (r.ok && n && n.id !== last.current) { last.current = n.id; sfx("notify"); say(n.title); reload(); }
+    }, 45000);
+    return () => clearInterval(t);
+  }, []);
   const tabs = [["home", "home", "Bosh"], ...(s.store_enabled ? [["store", "cart", "Do'kon"]] : []), ["notes", "bell", "Xabarlar"]];
   return (
     <div className="wrap fade">
@@ -146,8 +191,10 @@ export default function Client({ d, reload, th }) {
             <Stat icon="check" n={d.stats?.month} label="shu oy" />
             <Stat icon="trophy" n={d.stats?.total} label="jami kelish" />
           </div>
+          <Level st={d.stats} />
           <Leaderboard top={d.top} />
           <Bio />
+          <SoundSwitch />
           <div className="card row between">
             <div><b>Bildirishnoma ovozi</b><div className="mut">Telegram xabarlari ovozi</div></div>
             <Switch on={!u.silent} onClick={async () => { await api("/api/me", { silent: !u.silent }); reload(); }} />
