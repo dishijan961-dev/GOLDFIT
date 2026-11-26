@@ -51,8 +51,10 @@ export async function POST(req: Request) {
     await say(id, "Ilovaga login va parol bilan kirasiz. Ma'lumotlarni zal ma'muriyatidan oling.", openBtn(url));
     return OK();
   }
-  if (!bu?.phone) {
-    await say(id, welcome, { reply_markup: { keyboard: [[{ text: "📱 Raqamni ulashish", request_contact: true }]], resize_keyboard: true, one_time_keyboard: true } });
+  // /start bosilganda har safar raqamni qayta so'raydi
+  const isStart = (m.text || "").trim().toLowerCase().startsWith("/start");
+  if (isStart || !bu?.phone) {
+    await say(id, bu?.phone ? "🔐 <b>Tasdiqlash</b>\n\nDavom etish uchun telefon raqamingizni qayta ulashing 👇" : welcome, { reply_markup: { keyboard: [[{ text: "📱 Raqamni ulashish", request_contact: true }]], resize_keyboard: true, one_time_keyboard: true } });
     return OK();
   }
 
