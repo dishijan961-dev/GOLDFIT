@@ -7,7 +7,7 @@ const bad = (error: string, status = 400) => NextResponse.json({ error }, { stat
 
 export async function POST(req: Request) {
   const u = await getUser();
-  if (!u || u.role !== "owner") return bad("Ruxsat yo'q", 403);
+  if (!u || !["owner", "manager"].includes(u.role)) return bad("Ruxsat yo'q", 403);
 
   const file = (await req.formData()).get("file");
   if (!(file instanceof File)) return bad("Fayl topilmadi");

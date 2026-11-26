@@ -34,7 +34,7 @@ function VipCard({ u, active }) {
 
 function Locker({ d, inGym }) {
   const u = d.user;
-  if (!d.settings.lockers_enabled) return null;
+  if (!d.settings.lockers_enabled && !d.locker) return null;
   const till = u.checked_in_until ? new Date(u.checked_in_until).toLocaleTimeString("uz-UZ", { hour: "2-digit", minute: "2-digit" }) : "";
   if (d.locker) return (
     <div className="card locker">

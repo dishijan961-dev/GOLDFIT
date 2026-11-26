@@ -67,7 +67,7 @@ export async function GET(req: Request) {
         db.from("visits").select("user_id").gte("at", from),
         db.from("payments").select("amount").gte("paid_at", from),
         db.from("users").select("id").eq("role", "client").gte("created_at", from),
-        db.from("users").select("tg_id").eq("role", "owner").not("tg_id", "is", null),
+        db.from("users").select("tg_id").in("role", ["owner", "manager"]).not("tg_id", "is", null),
       ]);
       const income = (pa.data || []).reduce((a: number, x: any) => a + (x.amount || 0), 0);
       const text = `📊 Bugungi xulosa (${today})\n\n👥 Kelganlar: ${new Set((vi.data || []).map((x: any) => x.user_id)).size}\n💰 Tushum: ${income.toLocaleString()} so'm\n🆕 Yangi a'zolar: ${nw.data?.length || 0}`;

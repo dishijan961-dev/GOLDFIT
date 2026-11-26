@@ -71,7 +71,7 @@ export async function POST(req: Request) {
       if (!v.verified) return bad("Tasdiqlanmadi", 401);
       await db.from("passkeys").update({ counter: v.authenticationInfo.newCounter }).eq("id", row.id);
       const { data: u } = await db.from("users").select("id,blocked,role").eq("id", row.user_id).single();
-      if (!u || (u.blocked && u.role === "client")) return bad("Hisob bloklangan", 403);
+      if (!u || (u.blocked && u.role !== "owner")) return bad("Hisob bloklangan", 403);
       const res = NextResponse.json({ ok: true });
       res.cookies.set("gf", makeToken(u.id), sessionCookie);
       return res;

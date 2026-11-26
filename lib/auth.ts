@@ -19,7 +19,7 @@ export async function getUser() {
   const [uid, exp, sig] = t.split(".");
   if (!sig || hmac(`${uid}.${exp}`) !== sig || Date.now() > +exp) return null;
   const { data } = await db.from("users").select("*").eq("id", uid).single();
-  if (!data || (data.blocked && data.role === "client")) return null;
+  if (!data || (data.blocked && data.role !== "owner")) return null;
   return data;
 }
 

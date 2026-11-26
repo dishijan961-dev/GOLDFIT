@@ -18,12 +18,22 @@ export async function ensureLockers(count: number) {
 }
 
 // Mijozga birinchi bo'sh shkafni beradi (funksiya o'chiq bo'lsa null)
-export async function assignLocker(userId: string, until: string): Promise<number | null> {
+export async function assignLocker(userId: string, until: string, opts: { force?: boolean; num?: number } = {}): Promise<number | null> {
   const s = await getSettings();
-  if (!s.lockers_enabled) return null;
+  if (!s.lockers_enabled && !opts.force) return null;
+  if (opts.force) {
+    // Qo'lda kirgizishda funksiya o'chiq bo'lsa ham shkaflar mavjud bo'lishi kerak
+    const { count } = await db.from("lockers").select("num", { count: "exact", head: true });
+    if (!count) await ensureLockers(+s.lockers_count || 100);
+  }
   await releaseExpired();
   const { data: mine } = await db.from("lockers").select("num").eq("user_id", userId).maybeSingle();
   if (mine) { await db.from("lockers").update({ until }).eq("num", mine.num); return mine.num; }
+  if (opts.num) {
+    const { data: want } = await db.from("lockers").update({ user_id: userId, until, assigned_at: nowIso() })
+      .eq("num", opts.num).is("user_id", null).select("num");
+    if (want?.length) return opts.num;
+  }
   for (let i = 0; i < 4; i++) {
     const { data: free } = await db.from("lockers").select("num").is("user_id", null).order("num").limit(1).maybeSingle();
     if (!free) return null;

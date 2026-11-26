@@ -14,7 +14,7 @@ export async function GET() {
     const ms = `${tzToday().slice(0, 8)}01T00:00:00+05:00`;
     exercises = (await db.from("exercises").select("*").eq("active", true).order("grp").order("title")).data || [];
     const [lk, mv] = await Promise.all([
-      settings.lockers_enabled ? lockerOf(u.id) : Promise.resolve(null),
+      lockerOf(u.id),
       db.from("visits").select("user_id").gte("at", ms).limit(5000),
     ]);
     locker = lk;

@@ -10,6 +10,8 @@ import { encrypt, clearBotCache, getBotToken, webhookSecret, appUrl } from "@/li
 
 const bad = (error: string, status = 400) => NextResponse.json({ error }, { status });
 const ok = () => NextResponse.json({ ok: true });
+const MANAGER_KEYS = ["store_enabled", "lockers_enabled", "lockers_count"]; // zal egasi o'zgartira oladigan sozlamalar
+const SUPER_ONLY = ["connectBot", "disconnectBot", "setMenuButton", "backup", "restart"];
 const SETTING_KEYS = ["store_enabled", "theme", "season", "absent_days", "auto_block", "checkin_hours", "lockers_enabled", "lockers_count", "remind_on", "remind_days", "bot_welcome", "absent_msg_on", "absent_msg_days", "summary_on"];
 
 export async function GET(req: Request) {
@@ -32,7 +34,9 @@ export async function GET(req: Request) {
   await releaseExpired();
   const mstart = `${tzToday().slice(0, 8)}01T00:00:00+05:00`;
   const [c, p, v, b, mv, mp, od, lk, ex] = await Promise.all([
-    db.from("users").select("*").eq("role", "client").order("created_at", { ascending: false }),
+    (u.role === "trainer"
+      ? db.from("users").select("*").eq("role", "client").eq("trainer_id", u.id)
+      : db.from("users").select("*").eq("role", "client")).order("created_at", { ascending: false }),
     db.from("products").select("*").order("created_at", { ascending: false }),
     db.from("visits").select("at, users(first_name,last_name)").gte("at", start).order("at", { ascending: false }),
     db.from("bot_users").select("*").order("created_at", { ascending: false }),
@@ -48,17 +52,20 @@ export async function GET(req: Request) {
   (mv.data || []).forEach((x: any) => { monthVisits[x.user_id] = (monthVisits[x.user_id] || 0) + 1; });
   (mp.data || []).forEach((x: any) => { paidMonth[x.user_id] = (paidMonth[x.user_id] || 0) + (x.amount || 0); });
   const income = (mp.data || []).reduce((a: number, x: any) => a + (x.amount || 0), 0);
+  const stf = u.role === "trainer" ? { data: [] as any[] } : await db.from("users").select("*").in("role", u.role === "owner" ? ["trainer", "manager"] : ["trainer"]).order("created_at");
+  const hide = u.role === "trainer"; // trener faqat o'z mijozlarini ko'radi, pul ma'lumotlarini emas
   const strip = (x: any) => { const { pass_hash, ...r } = x; return r; };
   return NextResponse.json({
-    clients: (c.data || []).map(strip), products: p.data || [], visits: v.data || [], botUsers: b.data || [], monthVisits, paidMonth, income, orders: od.data || [], lockers: lk.data || [], exercises: ex.data || [], hours, ownerTg: u.tg_id || null,
-    displayUrl: u.role === "owner" && process.env.DISPLAY_KEY ? `${appUrl(req)}/display?key=${process.env.DISPLAY_KEY}` : null,
+    staff: (stf.data || []).map(strip), clients: (c.data || []).map(strip), products: p.data || [], visits: v.data || [], botUsers: b.data || [], monthVisits, paidMonth: hide ? {} : paidMonth, income: hide ? 0 : income, orders: hide ? [] : od.data || [], lockers: lk.data || [], exercises: ex.data || [], hours, ownerTg: u.tg_id || null,
+    displayUrl: u.role !== "trainer" && process.env.DISPLAY_KEY ? `${appUrl(req)}/display?key=${process.env.DISPLAY_KEY}` : null,
   });
 }
 
 export async function POST(req: Request) {
   const u = await getUser();
-  if (!u || u.role !== "owner") return bad("Ruxsat yo'q", 403);
+  if (!u || !["owner", "manager"].includes(u.role)) return bad("Ruxsat yo'q", 403);
   const b = await req.json();
+  if (u.role !== "owner" && SUPER_ONLY.includes(b.action)) return bad("Bu amal faqat super admin uchun", 403);
   const today = tzToday();
 
   switch (b.action) {
@@ -68,10 +75,12 @@ export async function POST(req: Request) {
       const days = +b.days || P.days;
       const gym = +b.gym_fee || P.price;                                   // zal puli
       const tr = b.trainer ? +b.trainer_fee || TRAINER_FEE : 0;            // trener puli (alohida)
+      const tName = async (id: any) => { if (!id) return null; const { data: t } = await db.from("users").select("first_name,last_name").eq("id", id).maybeSingle(); return t ? [t.first_name, t.last_name].filter(Boolean).join(" ") : null; };
+      const tid = b.trainer && b.trainer_id ? b.trainer_id : null;
       const { data, error } = await db.from("users").insert({
         role: "client", first_name: b.first_name, last_name: b.last_name || null, phone: b.phone,
         login: String(b.login).trim(), pass_hash: await bcrypt.hash(String(b.password), 10),
-        monthly_fee: gym + tr, gym_fee: gym, trainer: !!b.trainer, trainer_fee: tr, trainer_name: b.trainer_name || null,
+        monthly_fee: gym + tr, gym_fee: gym, trainer: !!b.trainer, trainer_fee: tr, trainer_name: (await tName(tid)) || b.trainer_name || null, ...(tid ? { trainer_id: tid } : {}),
         paid_until: days ? addDays(today, days) : null, plan: P.id, card_uid: b.card_uid ? String(b.card_uid).trim() : null,
       }).select().single();
       if (error) return bad(error.code === "23505" ? "Bu login band" : error.message);
@@ -96,8 +105,31 @@ export async function POST(req: Request) {
       const { data: c } = await db.from("users").select("gym_fee,plan").eq("id", b.id).single();
       const tr = b.trainer ? +b.trainer_fee || TRAINER_FEE : 0;
       const gym = c?.gym_fee || planOf(c?.plan).price;
-      await db.from("users").update({ trainer: !!b.trainer, trainer_fee: tr, trainer_name: b.trainer ? b.trainer_name || null : null, monthly_fee: gym + tr }).eq("id", b.id);
+      let tn = b.trainer ? b.trainer_name || null : null;
+      if (b.trainer && b.trainer_id) { const { data: t } = await db.from("users").select("first_name,last_name").eq("id", b.trainer_id).maybeSingle(); if (t) tn = [t.first_name, t.last_name].filter(Boolean).join(" "); }
+      const base = { trainer: !!b.trainer, trainer_fee: tr, trainer_name: tn, monthly_fee: gym + tr };
+      const r1 = await db.from("users").update({ ...base, trainer_id: b.trainer ? b.trainer_id || null : null }).eq("id", b.id);
+      if (r1.error) await db.from("users").update(base).eq("id", b.id); // migration_v5 hali ishga tushmagan bo'lsa ham trener saqlanadi
       if (b.trainer && b.charge) await db.from("payments").insert({ user_id: b.id, amount: tr, gym_amount: 0, trainer_amount: tr, days: 0, plan: c?.plan });
+      return ok();
+    }
+    case "addStaff": {
+      // Trener yoki zal egasi (faqat super admin zal egasini qo'sha oladi)
+      const role = b.role === "manager" ? "manager" : "trainer";
+      if (role === "manager" && u.role !== "owner") return bad("Zal egasini faqat super admin qo'sha oladi", 403);
+      if (!b.first_name || !b.login || !b.password) return bad("Ism, login va parol majburiy");
+      if (String(b.password).length < 6) return bad("Parol kamida 6 belgi bo'lsin");
+      const { error } = await db.from("users").insert({
+        role, first_name: b.first_name, last_name: b.last_name || null, phone: b.phone || null,
+        login: String(b.login).trim(), pass_hash: await bcrypt.hash(String(b.password), 10),
+      });
+      return error ? bad(error.code === "23505" ? "Bu login band" : error.message.includes("users_role_check") ? "Avval migration_v5.sql ni ishga tushiring" : error.message) : ok();
+    }
+    case "delStaff": {
+      const { data: t } = await db.from("users").select("role").eq("id", b.id).single();
+      if (!t || !["trainer", "manager"].includes(t.role)) return bad("Topilmadi");
+      if (t.role === "manager" && u.role !== "owner") return bad("Faqat super admin", 403);
+      await db.from("users").delete().eq("id", b.id);
       return ok();
     }
     case "manualIn": {
@@ -107,7 +139,7 @@ export async function POST(req: Request) {
       const expired = !c.paid_until || c.paid_until < today;
       if ((c.blocked || expired) && !b.force)
         return NextResponse.json({ error: c.blocked ? "Mijoz bloklangan" : "Obunasi tugagan", needForce: true }, { status: 409 });
-      const { locker } = await recordVisit(c.id, "manual");
+      const { locker } = await recordVisit(c.id, "manual", { force: true, num: +b.locker || undefined }); // qo'lda kirganda shkaf albatta beriladi
       return NextResponse.json({ ok: true, locker });
     }
     case "manualOut":
@@ -186,6 +218,7 @@ export async function POST(req: Request) {
       return ok();
     case "setSetting":
       if (!SETTING_KEYS.includes(b.key)) return bad("Noma'lum sozlama");
+      if (u.role !== "owner" && !MANAGER_KEYS.includes(b.key)) return bad("Bu sozlama faqat super admin uchun", 403);
       await db.from("settings").upsert({ key: b.key, value: b.value });
       clearSettingsCache();
       if (b.key === "lockers_enabled" && b.value) await ensureLockers((await db.from("settings").select("value").eq("key", "lockers_count").maybeSingle()).data?.value || 100);

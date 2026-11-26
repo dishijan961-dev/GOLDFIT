@@ -15,25 +15,25 @@ export default function Owner({ d, reload, th }) {
   const [f, setF] = useState({}), [pf, setPf] = useState({}), [nf, setNf] = useState({ target: "all" }), [cf, setCf] = useState({}), [bf, setBf] = useState({});
   const [payDays, setPayDays] = useState(0), [showAll, setShowAll] = useState(false), [showForm, setShowForm] = useState(false), [q, setQ] = useState("");
   const [busy, setBusy] = useState(false), [sup, setSup] = useState(false);
-  const [hist, setHist] = useState(null), [hr, setHr] = useState("day"), [hd, setHd] = useState(today()), [mi, setMi] = useState(""), [ef, setEf] = useState({}), [eg, setEg] = useState("");
+  const [pl, setPl] = useState(""), [hist, setHist] = useState(null), [hr, setHr] = useState("day"), [hd, setHd] = useState(today()), [mi, setMi] = useState(""), [ef, setEf] = useState({}), [eg, setEg] = useState("");
   const [sec, setSec] = useState(null), [bk, setBk] = useState(false), [rf, setRf] = useState({}), [snd, setSnd] = useState(true), [rmsg, setRmsg] = useState("");
-  const s = d.settings, isOwner = d.user.role === "owner";
+  const s = d.settings, isSuper = d.user.role === "owner", isOwner = isSuper || d.user.role === "manager";
   const ld = async () => setO(await api("/api/owner"));
   useEffect(() => { ld(); setSup(pkSupported()); setSnd(soundOn()); }, []);
   const loadHist = async () => setHist(await api(`/api/owner?history=${hr}&date=${hd}`));
   useEffect(() => { if (tab === "att") loadHist(); }, [tab, hr, hd]);
-  const manual = async (c, out) => {
+  const manual = async (c, out, num) => {
     setBusy(true);
-    let r = await api("/api/owner", { action: out ? "manualOut" : "manualIn", id: c.id });
+    let r = await api("/api/owner", { action: out ? "manualOut" : "manualIn", id: c.id, locker: num || undefined });
     if (!out && r.needForce) {
       setBusy(false);
       if (!confirm(`${r.error}. Baribir zalga kirgizamizmi?`)) return;
       setBusy(true);
-      r = await api("/api/owner", { action: "manualIn", id: c.id, force: true });
+      r = await api("/api/owner", { action: "manualIn", id: c.id, force: true, locker: num || undefined });
     }
     setBusy(false);
     sfx(r.ok ? "ok" : "bad");
-    say(r.ok ? (out ? `${name(c)} zaldan chiqdi` : r.locker ? `${name(c)} zalga kirdi. Shkaf №${r.locker}` : `${name(c)} zalga kirdi`) : r.error);
+    say(r.ok ? (out ? `${name(c)} zaldan chiqdi` : r.locker ? `${name(c)} zalga kirdi. Shkaf №${r.locker} berildi` : `${name(c)} zalga kirdi, lekin bo'sh shkaf qolmadi`) : r.error);
     await ld();
     if (tab === "att") loadHist();
   };
@@ -62,6 +62,8 @@ export default function Owner({ d, reload, th }) {
     </div>
   );
 
+  const trainers = (o.staff || []).filter((x) => x.role === "trainer");
+  const managers = (o.staff || []).filter((x) => x.role === "manager");
   const lkOf = Object.fromEntries((o.lockers || []).filter((l) => l.user_id).map((l) => [l.user_id, l.num]));
   const inGym = (c) => c.checked_in_until && new Date(c.checked_in_until) > new Date();
   const gymNow = o.clients.filter(inGym);
@@ -72,9 +74,9 @@ export default function Owner({ d, reload, th }) {
   const lockers = o.lockers || [];
   const busyL = lockers.filter((l) => l.user_id).length;
   const T = isOwner
-    ? [["home", "home", "Bosh"], ["clients", "users", "Mijozlar"], ["table", "table", "Jadval"], ["att", "check", "Davomat"], ["lockers", "locker", "Shkaflar"], ["shop", "cart", "Do'kon"], ["exercises", "dumbbell", "Mashq"], ["msg", "bell", "Xabar"], ["bot", "bot", "Bot"], ["set", "sliders", "Sozlama"]]
+    ? [["home", "home", "Bosh"], ["clients", "users", "Mijozlar"], ["table", "table", "Jadval"], ["att", "check", "Davomat"], ["lockers", "locker", "Shkaflar"], ["shop", "cart", "Do'kon"], ["exercises", "dumbbell", "Mashq"], ["msg", "bell", "Xabar"], ...(isSuper ? [["bot", "bot", "Bot"], ["set", "sliders", "Sozlama"]] : [])]
     : [["clients", "users", "Mijozlar"], ["att", "check", "Davomat"]];
-  const cur = isOwner ? tab : ["clients", "att"].includes(tab) ? tab : "clients";
+  const cur = isOwner ? (["bot", "set"].includes(tab) && !isSuper ? "home" : tab) : ["clients", "att"].includes(tab) ? tab : "clients";
   const mon = today().slice(0, 7);
 
   return (
@@ -83,7 +85,7 @@ export default function Owner({ d, reload, th }) {
       <div className="row between" style={{ marginBottom: 8 }}>
         <div className="row"><img src="/logo.jpeg" alt="" width="40" height="40" style={{ borderRadius: "50%" }} /><h2 className="gold" style={{ margin: 0, letterSpacing: 3 }}>GOLD FIT</h2></div>
         <div className="row" style={{ gap: 8 }}>
-          {isOwner && <Btn icon="sliders" cls="sm" onClick={() => { setSec(null); setTab("set"); window.scrollTo({ top: 0 }); }}>Sozlama</Btn>}
+          {isSuper && <Btn icon="sliders" cls="sm" onClick={() => { setSec(null); setTab("set"); window.scrollTo({ top: 0 }); }}>Sozlama</Btn>}
           <Btn icon="logout" cls="ghost sm" onClick={() => bus.logout()}>{""}</Btn>
         </div>
       </div>
@@ -137,6 +139,21 @@ export default function Owner({ d, reload, th }) {
         <div className="fade">
           <Head icon="users" title="Mijozlar" sub={`${o.clients.length} ta a'zo`} right={isOwner && <Btn icon={showForm ? "x" : "plus"} cls="sm" onClick={() => setShowForm(!showForm)}>{showForm ? "Yopish" : "Yangi"}</Btn>} />
           {isOwner && showForm && (
+            <div className="seg" style={{ marginBottom: 12 }}>
+              {[["client", "Mijoz"], ["trainer", "Trener"], ...(isSuper ? [["manager", "Zal egasi"]] : [])].map(([k, t]) => <button key={k} className={(f.type || "client") === k ? "on" : ""} onClick={() => setF({ ...f, type: k })}>{t}</button>)}
+            </div>
+          )}
+          {isOwner && showForm && (f.type === "trainer" || f.type === "manager") && (
+            <div className="card">
+              <b>{f.type === "manager" ? "Yangi zal egasi" : "Yangi trener"}</b>
+              <p className="mut">{f.type === "manager" ? "Zal egasi mijozlar, davomat, shkaf, do'kon va xabarlarni boshqaradi. Bot va sozlamalar faqat sizda qoladi." : "Trener faqat o'ziga biriktirilgan mijozlarni va ularning davomatini ko'radi."}</p>
+              <In f={f} setF={setF} k="first_name" ph="Ism *" /><In f={f} setF={setF} k="last_name" ph="Familiya" />
+              <In f={f} setF={setF} k="phone" ph="Telefon raqami" type="tel" />
+              <In f={f} setF={setF} k="login" ph="Login *" /><In f={f} setF={setF} k="password" ph="Parol * (kamida 6 belgi)" />
+              <Btn icon="plus" onClick={async () => { const r = await act({ action: "addStaff", role: f.type, ...f }, f.type === "manager" ? "Zal egasi qo'shildi" : "Trener qo'shildi"); if (r.ok) { setF({}); setShowForm(false); } }}>{f.type === "manager" ? "Zal egasini qo'shish" : "Trenerni qo'shish"}</Btn>
+            </div>
+          )}
+          {isOwner && showForm && (f.type || "client") === "client" && (
             <div className="card">
               <In f={f} setF={setF} k="first_name" ph="Ism *" /><In f={f} setF={setF} k="last_name" ph="Familiya" />
               <In f={f} setF={setF} k="phone" ph="Telefon raqami *" type="tel" />
@@ -147,12 +164,26 @@ export default function Owner({ d, reload, th }) {
               </select>
               <In f={f} setF={setF} k="gym_fee" ph={`Zal puli (bo'sh = ${planOf(f.plan || "monthly").price.toLocaleString()} so'm)`} type="number" />
               <Row title="Trener bilan" sub="Trener puli zal pulidan alohida hisoblanadi"><Switch on={!!f.trainer} onClick={() => setF({ ...f, trainer: !f.trainer })} /></Row>
-              {f.trainer && (<><In f={f} setF={setF} k="trainer_name" ph="Trener ismi (ixtiyoriy)" /><In f={f} setF={setF} k="trainer_fee" ph={`Trener puli (bo'sh = ${TRAINER_FEE.toLocaleString()} so'm)`} type="number" /></>)}
+              {f.trainer && (<>
+                {trainers.length > 0
+                  ? <select value={f.trainer_id || ""} onChange={(x) => setF({ ...f, trainer_id: x.target.value })}><option value="">Trenerni tanlang…</option>{trainers.map((t) => <option key={t.id} value={t.id}>{name(t)}</option>)}</select>
+                  : <In f={f} setF={setF} k="trainer_name" ph="Trener ismi (ixtiyoriy)" />}<In f={f} setF={setF} k="trainer_fee" ph={`Trener puli (bo'sh = ${TRAINER_FEE.toLocaleString()} so'm)`} type="number" /></>)}
               {(() => { const g = +f.gym_fee || planOf(f.plan || "monthly").price, t = f.trainer ? +f.trainer_fee || TRAINER_FEE : 0; return (
                 <div className="total"><div className="mut">Zal: {g.toLocaleString()}{f.trainer ? ` + Trener: ${t.toLocaleString()}` : ""}<br />JAMI to'lov</div><b>{(g + t).toLocaleString()} so'm</b></div>
               ); })()}
               <In f={f} setF={setF} k="card_uid" ph="Braslet/karta raqami (ixtiyoriy)" />
               <Btn icon="plus" onClick={async () => { const r = await act({ action: "addClient", ...f }, "Mijoz qo'shildi"); if (r.ok) { setF({}); setShowForm(false); } }}>Mijozni qo'shish</Btn>
+            </div>
+          )}
+          {isOwner && trainers.length > 0 && (
+            <div className="card">
+              <div className="row" style={{ marginBottom: 8 }}><Ic n="dumbbell" s={20} /><b>Trenerlar ({trainers.length})</b></div>
+              {trainers.map((t) => (
+                <div className="row between" key={t.id} style={{ marginBottom: 8 }}>
+                  <div><div>{name(t)}</div><div className="mut">{o.clients.filter((c) => c.trainer_id === t.id).length} ta mijoz · login: {t.login}</div></div>
+                  <Btn icon="trash" cls="red sm" onClick={() => confirm(`${name(t)} o'chirilsinmi?`) && act({ action: "delStaff", id: t.id }, "Trener o'chirildi")}>{""}</Btn>
+                </div>
+              ))}
             </div>
           )}
           <input placeholder="Qidirish: ism, telefon, username" value={q} onChange={(x) => setQ(x.target.value)} />
@@ -178,6 +209,11 @@ export default function Owner({ d, reload, th }) {
                     <Btn icon="wallet" cls="sm" onClick={() => act({ action: "pay", id: c.id, plan: c.plan, days: +payDays || undefined }, "To'lov yozildi")}>To'lov: {((c.gym_fee || planOf(c.plan).price) + (c.trainer ? c.trainer_fee || TRAINER_FEE : 0)).toLocaleString()}</Btn>
                   </div>
                   <div className="row" style={{ marginTop: 8 }}>
+                    {c.trainer && trainers.length > 0 && (
+                      <select style={{ margin: 0, minHeight: 46, flex: "1 1 100%" }} value={c.trainer_id || ""} onChange={(x) => act({ action: "setTrainer", id: c.id, trainer: true, trainer_id: x.target.value || null }, "Trener biriktirildi")}>
+                        <option value="">Trenerni tanlang…</option>{trainers.map((t) => <option key={t.id} value={t.id}>{name(t)}</option>)}
+                      </select>
+                    )}
                     <Btn icon="dumbbell" cls="ghost sm" onClick={() => act({ action: "setTrainer", id: c.id, trainer: !c.trainer, charge: !c.trainer && isActive(c) && confirm("Trener puli hozir to'lansinmi?") }, c.trainer ? "Trener olib tashlandi" : "Trener qo'shildi")}>{c.trainer ? "Trenersiz qilish" : "Trener qo'shish"}</Btn>
                     <Btn icon={c.blocked ? "check2" : "lock"} cls={"sm " + (c.blocked ? "dark" : "red")} onClick={() => act({ action: "block", id: c.id, blocked: !c.blocked })}>{c.blocked ? "Ochish" : "Bloklash"}</Btn>
                   </div>
@@ -226,7 +262,11 @@ export default function Owner({ d, reload, th }) {
                 <option value="">Mijozni tanlang…</option>
                 {o.clients.filter((c) => !inGym(c)).map((c) => <option key={c.id} value={c.id}>{name(c)} ({c.phone}){isActive(c) ? "" : " — obunasi tugagan"}</option>)}
               </select>
-              <Btn icon="enter" disabled={!mi} onClick={async () => { const c = o.clients.find((x) => x.id === mi); if (c) { await manual(c, false); setMi(""); } }}>Zalga kirdi</Btn>
+              <select value={pl} onChange={(x) => setPl(x.target.value)}>
+                <option value="">Shkaf: avtomatik (birinchi bo'sh)</option>
+                {(o.lockers || []).filter((l) => !l.user_id).map((l) => <option key={l.num} value={l.num}>Shkaf №{l.num}</option>)}
+              </select>
+              <Btn icon="enter" disabled={!mi} onClick={async () => { const c = o.clients.find((x) => x.id === mi); if (c) { await manual(c, false, +pl || undefined); setMi(""); setPl(""); } }}>Zalga kirdi va shkaf berish</Btn>
             </div>
           )}
           <div className="card">
@@ -441,7 +481,7 @@ export default function Owner({ d, reload, th }) {
         );
       })()}
 
-      {cur === "bot" && isOwner && (
+      {cur === "bot" && isSuper && (
         <div className="fade">
           <Head icon="bot" title="Bot sozlamalari" sub={s.bot_username ? "@" + s.bot_username : "Ulanmagan"} />
           <div className="card">
@@ -482,13 +522,14 @@ export default function Owner({ d, reload, th }) {
         </div>
       )}
 
-      {cur === "set" && isOwner && (
+      {cur === "set" && isSuper && (
         <div className="fade">
           {!sec && (
             <>
               <Head icon="sliders" title="Super admin" sub="Har bir boshqaruv alohida bo'limda" />
               <div className="hubgrid">
                 {[
+                  ["staff", "users", "Xodimlar", `${managers.length} zal egasi · ${trainers.length} trener`],
                   ["design", "palette", "Dizayn", "Rang va bayram shablonlari"],
                   ["access", "clock", "Avto-blok va vaqt", `${s.absent_days} kun · ${s.checkin_hours} soat`],
                   ["lockers", "locker", "Shkaflar", s.lockers_enabled ? "Yoqilgan" : "O'chiq"],
@@ -506,6 +547,33 @@ export default function Owner({ d, reload, th }) {
             </>
           )}
           {sec && <div style={{ marginBottom: 12 }}><Btn icon="back" cls="ghost sm" onClick={() => setSec(null)}>Orqaga</Btn></div>}
+
+          {sec === "staff" && (
+            <>
+              <Head icon="users" title="Xodimlar" sub="Zal egasi va trenerlar" />
+              <div className="card">
+                <b>Zal egasi ({managers.length})</b>
+                <p className="mut">Mijozlar, davomat, shkaf, do'kon, xabar va mashqlarni boshqaradi. Bot, dizayn, xavfsizlik va restart faqat sizda.</p>
+                {managers.map((m) => (
+                  <div className="row between" key={m.id} style={{ marginBottom: 8 }}>
+                    <div><div>{name(m)}</div><div className="mut">login: {m.login}</div></div>
+                    <Btn icon="trash" cls="red sm" onClick={() => confirm(`${name(m)} o'chirilsinmi?`) && act({ action: "delStaff", id: m.id }, "O'chirildi")}>{""}</Btn>
+                  </div>
+                ))}
+                <Btn icon="plus" onClick={() => { setF({ type: "manager" }); setShowForm(true); setSec(null); setTab("clients"); window.scrollTo({ top: 0 }); }}>Zal egasini qo'shish</Btn>
+              </div>
+              <div className="card">
+                <b>Trenerlar ({trainers.length})</b>
+                {trainers.map((t) => (
+                  <div className="row between" key={t.id} style={{ marginBottom: 8 }}>
+                    <div><div>{name(t)}</div><div className="mut">{o.clients.filter((c) => c.trainer_id === t.id).length} ta mijoz · login: {t.login}</div></div>
+                    <Btn icon="trash" cls="red sm" onClick={() => confirm(`${name(t)} o'chirilsinmi?`) && act({ action: "delStaff", id: t.id }, "O'chirildi")}>{""}</Btn>
+                  </div>
+                ))}
+                <Btn icon="plus" cls="ghost" onClick={() => { setF({ type: "trainer" }); setShowForm(true); setSec(null); setTab("clients"); window.scrollTo({ top: 0 }); }}>Trener qo'shish</Btn>
+              </div>
+            </>
+          )}
 
           {sec === "design" && (
             <>
