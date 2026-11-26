@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
-import { makeToken, verifyInitData, safe } from "@/lib/auth";
+import { makeToken, verifyInitData, safe, sessionCookie } from "@/lib/auth";
 
 const bad = (error: string, status = 400) => NextResponse.json({ error }, { status });
 const last9 = (s: string) => String(s || "").replace(/\D/g, "").slice(-9);
@@ -11,6 +11,15 @@ export async function POST(req: Request) {
   const { login, password, initData } = await req.json();
   const t = initData ? await verifyInitData(initData) : null;
 
+  // Telegram ichida: bir marta kirgan mijoz keyingi safar parolsiz kiradi
+  if (!login && !password) {
+    if (!t) return bad("Kirish kerak", 401);
+    const { data: a } = await db.from("users").select("*").eq("tg_id", t.id).eq("role", "client").maybeSingle();
+    if (!a || a.blocked) return bad("Kirish kerak", 401);
+    const r = NextResponse.json({ user: safe(a) });
+    r.cookies.set("gf", makeToken(a.id), sessionCookie);
+    return r;
+  }
   const { data: u } = await db.from("users").select("*").eq("login", String(login || "").trim()).single();
   if (!u || !(await bcrypt.compare(String(password || ""), u.pass_hash))) {
     await wait(800);
@@ -36,6 +45,6 @@ export async function POST(req: Request) {
   }
 
   const res = NextResponse.json({ user: safe(u) });
-  res.cookies.set("gf", makeToken(u.id), { httpOnly: true, secure: true, sameSite: "lax", maxAge: 2592000, path: "/" });
+  res.cookies.set("gf", makeToken(u.id), sessionCookie);
   return res;
 }

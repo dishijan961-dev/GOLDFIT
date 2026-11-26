@@ -1,4 +1,4 @@
-import { db } from "@/lib/db";
+import { db, getSettings } from "@/lib/db";
 import { tg } from "@/lib/tg";
 import { appUrl, webhookSecret } from "@/lib/bot";
 
@@ -20,6 +20,7 @@ export async function POST(req: Request) {
   if (!m?.from) return OK();
   const id: number = m.from.id;
   const url = appUrl(req);
+  const welcome = ((await getSettings()).bot_welcome || "").trim() || "🏋️ GOLD FIT ga xush kelibsiz!\nDavom etish uchun telefon raqamingizni ulashing.";
 
   await db.from("bot_users").upsert({ tg_id: id, username: m.from.username || null, first_name: m.from.first_name || null });
   const { data: bu } = await db.from("bot_users").select("*").eq("tg_id", id).single();
@@ -38,7 +39,7 @@ export async function POST(req: Request) {
 
   await tg("sendMessage", {
     chat_id: id,
-    text: "🏋️ GOLD FIT ga xush kelibsiz!\nDavom etish uchun telefon raqamingizni ulashing.",
+    text: welcome,
     reply_markup: { keyboard: [[{ text: "📱 Raqamni ulashish", request_contact: true }]], resize_keyboard: true, one_time_keyboard: true },
   });
   return OK();

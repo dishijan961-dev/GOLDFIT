@@ -1,21 +1,23 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
-import { db, tzToday, addDays } from "@/lib/db";
+import { db, tzToday, addDays, clearSettingsCache } from "@/lib/db";
 import { getUser } from "@/lib/auth";
 import { tg } from "@/lib/tg";
 import { PLANS, planOf } from "@/lib/plans";
+import { ensureLockers, releaseExpired } from "@/lib/lockers";
 import { encrypt, clearBotCache, getBotToken, webhookSecret, appUrl } from "@/lib/bot";
 
 const bad = (error: string, status = 400) => NextResponse.json({ error }, { status });
 const ok = () => NextResponse.json({ ok: true });
-const SETTING_KEYS = ["store_enabled", "theme", "season", "absent_days", "auto_block", "checkin_hours"];
+const SETTING_KEYS = ["store_enabled", "theme", "season", "absent_days", "auto_block", "checkin_hours", "lockers_enabled", "lockers_count", "remind_on", "remind_days", "bot_welcome"];
 
 export async function GET(req: Request) {
   const u = await getUser();
   if (!u || u.role === "client") return bad("Ruxsat yo'q", 403);
   const start = `${tzToday()}T00:00:00+05:00`;
+  await releaseExpired();
   const mstart = `${tzToday().slice(0, 8)}01T00:00:00+05:00`;
-  const [c, p, v, b, mv, mp, od] = await Promise.all([
+  const [c, p, v, b, mv, mp, od, lk] = await Promise.all([
     db.from("users").select("*").eq("role", "client").order("created_at", { ascending: false }),
     db.from("products").select("*").order("created_at", { ascending: false }),
     db.from("visits").select("at, users(first_name,last_name)").gte("at", start).order("at", { ascending: false }),
@@ -23,6 +25,7 @@ export async function GET(req: Request) {
     db.from("visits").select("user_id").gte("at", mstart),
     db.from("payments").select("user_id, amount").gte("paid_at", mstart),
     db.from("orders").select("id, total, items, created_at, users(first_name,last_name,phone)").order("created_at", { ascending: false }).limit(100),
+    db.from("lockers").select("num, user_id, until, users(first_name,last_name)").order("num"),
   ]);
   const monthVisits: Record<string, number> = {}, paidMonth: Record<string, number> = {};
   (mv.data || []).forEach((x: any) => { monthVisits[x.user_id] = (monthVisits[x.user_id] || 0) + 1; });
@@ -30,7 +33,7 @@ export async function GET(req: Request) {
   const income = (mp.data || []).reduce((a: number, x: any) => a + (x.amount || 0), 0);
   const strip = (x: any) => { const { pass_hash, ...r } = x; return r; };
   return NextResponse.json({
-    clients: (c.data || []).map(strip), products: p.data || [], visits: v.data || [], botUsers: b.data || [], monthVisits, paidMonth, income, orders: od.data || [],
+    clients: (c.data || []).map(strip), products: p.data || [], visits: v.data || [], botUsers: b.data || [], monthVisits, paidMonth, income, orders: od.data || [], lockers: lk.data || [],
     displayUrl: u.role === "owner" && process.env.DISPLAY_KEY ? `${appUrl(req)}/display?key=${process.env.DISPLAY_KEY}` : null,
   });
 }
@@ -92,7 +95,20 @@ export async function POST(req: Request) {
     case "setSetting":
       if (!SETTING_KEYS.includes(b.key)) return bad("Noma'lum sozlama");
       await db.from("settings").upsert({ key: b.key, value: b.value });
+      clearSettingsCache();
+      if (b.key === "lockers_enabled" && b.value) await ensureLockers((await db.from("settings").select("value").eq("key", "lockers_count").maybeSingle()).data?.value || 100);
+      if (b.key === "lockers_count") await ensureLockers(+b.value || 100);
       return ok();
+    case "releaseAll":
+      await db.from("lockers").update({ user_id: null, until: null, assigned_at: null }).not("num", "is", null);
+      return ok();
+    case "releaseLocker":
+      await db.from("lockers").update({ user_id: null, until: null, assigned_at: null }).eq("num", +b.num);
+      return ok();
+    case "setMenuButton": {
+      const r = await tg("setChatMenuButton", { menu_button: { type: "web_app", text: "GOLD FIT", web_app: { url: appUrl(req) } } });
+      return r?.ok ? ok() : bad("Bot ulanmagan yoki Telegram rad etdi");
+    }
     case "changeCreds": {
       const upd: any = { must_change: false };
       if (b.login) upd.login = String(b.login).trim();
@@ -120,6 +136,7 @@ export async function POST(req: Request) {
         { key: "bot_username", value: me.result.username },
       ]);
       clearBotCache();
+      await tg("setChatMenuButton", { menu_button: { type: "web_app", text: "GOLD FIT", web_app: { url } } });
       return ok();
     }
     case "disconnectBot": {

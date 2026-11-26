@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db, getSettings, tzToday } from "@/lib/db";
+import { assignLocker } from "@/lib/lockers";
 import { getUser, qrFor, QR_STEP } from "@/lib/auth";
 
 const bad = (error: string, status = 400) => NextResponse.json({ error }, { status });
@@ -18,5 +19,6 @@ export async function POST(req: Request) {
   const until = new Date(now.getTime() + s.checkin_hours * 3600e3).toISOString();
   await db.from("visits").insert({ user_id: u.id });
   await db.from("users").update({ last_visit: now.toISOString(), checked_in_until: until }).eq("id", u.id);
-  return NextResponse.json({ ok: true, until });
+  const locker = await assignLocker(u.id, until);
+  return NextResponse.json({ ok: true, until, locker });
 }

@@ -1,118 +1,10 @@
 // @ts-nocheck
 "use client";
 import { useEffect, useRef, useState } from "react";
-import QRCode from "qrcode";
-import { PLANS, planOf } from "@/lib/plans";
-import { THEMES, HOLIDAY_THEMES, resolveTheme } from "@/lib/themes";
-
-const TG = () => (typeof window !== "undefined" ? window.Telegram?.WebApp : null);
-async function api(url, body) {
-  const ctl = new AbortController();
-  const tm = setTimeout(() => ctl.abort(), 30000);
-  try {
-    const r = await fetch(url, {
-      ...(body ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : {}),
-      signal: ctl.signal, cache: "no-store",
-    });
-    const d = await r.json().catch(() => ({}));
-    return { ...d, ok: r.ok };
-  } catch (e) {
-    return { ok: false, error: "Server javob bermadi. Qayta urinib ko'ring" };
-  } finally {
-    clearTimeout(tm);
-  }
-}
-let toastSet = null;
-const say = (t) => { if (toastSet) toastSet(t); else alert(t); };
-const today = () => new Date(Date.now() + 5 * 3600e3).toISOString().slice(0, 10);
-const since = (d) => (d ? Math.floor((Date.now() - new Date(d)) / 864e5) : null);
-const name = (u) => [u?.first_name, u?.last_name].filter(Boolean).join(" ") || u?.login;
-
-function Fall({ icon }) {
-  const ref = useRef(null);
-  useEffect(() => {
-    const c = ref.current, x = c.getContext("2d");
-    const w = (c.width = innerWidth), h = (c.height = innerHeight);
-    const p = Array.from({ length: 36 }, () => ({ x: Math.random() * w, y: Math.random() * h, s: 10 + Math.random() * 12, v: 0.5 + Math.random() * 1.2, d: Math.random() * 6 }));
-    let raf;
-    const loop = () => {
-      x.clearRect(0, 0, w, h);
-      p.forEach((o) => { o.y += o.v; o.x += Math.sin((o.d += 0.02)); if (o.y > h) { o.y = -20; o.x = Math.random() * w; } x.font = o.s + "px serif"; x.fillText(icon, o.x, o.y); });
-      raf = requestAnimationFrame(loop);
-    };
-    loop();
-    return () => cancelAnimationFrame(raf);
-  }, [icon]);
-  return <canvas ref={ref} className="fall" />;
-}
-
-async function shrink(file, max = 800) {
-  const url = URL.createObjectURL(file);
-  const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
-  const k = Math.min(1, max / Math.max(img.width, img.height));
-  const c = document.createElement("canvas");
-  c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
-  c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-  URL.revokeObjectURL(url);
-  return new Promise((r) => c.toBlob(r, "image/jpeg", 0.82));
-}
-
-function Pick({ onUrl, children, cls = "btn ghost" }) {
-  const ref = useRef(null);
-  const [b, setB] = useState(false);
-  const pick = async (e) => {
-    const f = e.target.files?.[0];
-    e.target.value = "";
-    if (!f) return;
-    setB(true);
-    try {
-      const blob = await shrink(f);
-      const fd = new FormData();
-      fd.append("file", blob, "p.jpg");
-      const r = await fetch("/api/upload", { method: "POST", body: fd });
-      const d = await r.json().catch(() => ({}));
-      if (r.ok) onUrl(d.url); else say(d.error || "Rasm yuklanmadi");
-    } catch (err) { say("Rasm yuklanmadi"); }
-    setB(false);
-  };
-  return (
-    <>
-      <input ref={ref} type="file" accept="image/*" hidden onChange={pick} />
-      <button className={cls} disabled={b} onClick={() => ref.current.click()}>{b ? "Yuklanmoqda…" : children}</button>
-    </>
-  );
-}
-
-function QrLive() {
-  const [img, setImg] = useState(""), [full, setFull] = useState(false), [err, setErr] = useState("");
-  useEffect(() => {
-    let on = true;
-    const tick = async () => {
-      const r = await api("/api/qr");
-      if (!on) return;
-      if (!r.ok) return setErr(r.error || "QR olinmadi");
-      setErr("");
-      setImg(await QRCode.toDataURL(r.qr, { width: 640, margin: 1, color: { dark: "#000000", light: "#ffd400" } }));
-    };
-    tick();
-    const t = setInterval(tick, 15000);
-    return () => { on = false; clearInterval(t); };
-  }, []);
-  if (err) return <p className="bad">{err}</p>;
-  if (!img) return <p className="mut">QR tayyorlanmoqda…</p>;
-  return (
-    <>
-      <div className="qrbox"><img src={img} alt="QR" /></div>
-      <button className="btn" onClick={() => setFull(true)}>🔍 To'liq ekranda ko'rsatish</button>
-      {full && (
-        <div className="qrfull" onClick={() => setFull(false)}>
-          <img src={img} alt="QR" />
-          <div className="mut">Yopish uchun bosing</div>
-        </div>
-      )}
-    </>
-  );
-}
+import { resolveTheme } from "@/lib/themes";
+import { TG, api, bus, Fall, Btn, pkSupported, pkLogin } from "@/components/ui";
+import Client from "@/components/Client";
+import Owner from "@/components/Owner";
 
 function Splash() {
   return (
@@ -124,19 +16,73 @@ function Splash() {
   );
 }
 
+// Mini app ochilganda logotip videosi (bir sessiyada bir marta)
+function Intro({ onDone }) {
+  const v = useRef(null);
+  const [out, setOut] = useState(false), [skip, setSkip] = useState(false);
+  const end = () => {
+    setOut(true);
+    try { sessionStorage.setItem("gf_intro", "1"); } catch (e) {}
+    setTimeout(onDone, 700);
+  };
+  useEffect(() => {
+    const t = setTimeout(end, 9500), t2 = setTimeout(() => setSkip(true), 800);
+    const p = v.current?.play?.();
+    if (p?.catch) p.catch(end);
+    return () => { clearTimeout(t); clearTimeout(t2); };
+  }, []);
+  return (
+    <div className={"intro" + (out ? " out" : "")} onClick={end}>
+      <video ref={v} src="/intro.mp4" poster="/logo.jpeg" muted playsInline autoPlay preload="auto" onEnded={end} onError={end} />
+      {skip && <button className="skip" onClick={end}>O'tkazish</button>}
+    </div>
+  );
+}
+
+function Login({ onDone }) {
+  const [l, setL] = useState(""), [p, setP] = useState(""), [err, setErr] = useState(""), [busy, setBusy] = useState(false), [bio, setBio] = useState(false);
+  useEffect(() => { try { setBio(pkSupported() && !!localStorage.getItem("gf_pk")); } catch (e) {} }, []);
+  const go = async () => {
+    setBusy(true);
+    const r = await api("/api/login", { login: l, password: p, initData: TG()?.initData });
+    setBusy(false);
+    r.ok ? onDone() : setErr(r.error || "Xatolik");
+  };
+  const face = async () => { setBusy(true); const r = await pkLogin(); setBusy(false); r.ok ? onDone() : setErr(r.error || "Xatolik"); };
+  return (
+    <div className="center fade">
+      <img src="/logo.jpeg" className="logo-top" alt="" />
+      <h2 className="gold" style={{ textAlign: "center", letterSpacing: 5, fontSize: 28 }}>GOLD FIT</h2>
+      {bio && <Btn icon="finger" disabled={busy} onClick={face}>Face ID / barmoq izi bilan kirish</Btn>}
+      <input placeholder="Login" value={l} onChange={(x) => setL(x.target.value)} autoCapitalize="off" autoCorrect="off" />
+      <input placeholder="Parol" type="password" value={p} onChange={(x) => setP(x.target.value)} />
+      {err && <div className="bad">{err}</div>}
+      <Btn icon="lock" cls={bio ? "ghost" : ""} disabled={busy || !l || !p} onClick={go}>Kirish</Btn>
+      <div className="mut" style={{ textAlign: "center" }}>Login va parolni zal ma'muriyatidan oling</div>
+    </div>
+  );
+}
+
 export default function Page() {
-  const [boot, setBoot] = useState(true);
+  const [intro, setIntro] = useState(true);
   const [d, setD] = useState(null);
   const [toast, setToast] = useState("");
   const load = async () => {
     let r = await api("/api/me");
     if (!r.ok) r = await api("/api/me");
+    // Telegram ichida: avval kirgan mijoz parolsiz avtomatik kiradi
+    if (r.ok && !r.user && TG()?.initData) {
+      const a = await api("/api/login", { initData: TG().initData });
+      if (a.ok) r = await api("/api/me");
+    }
     setD(r);
   };
   useEffect(() => {
-    toastSet = (t) => { setToast(String(t)); setTimeout(() => setToast(""), 3200); };
-    TG()?.ready(); TG()?.expand(); load(); setTimeout(() => setBoot(false), 2300);
-    return () => { toastSet = null; };
+    bus.toast = (t) => { setToast(String(t)); setTimeout(() => setToast(""), 3200); };
+    TG()?.ready(); TG()?.expand();
+    try { if (sessionStorage.getItem("gf_intro")) setIntro(false); } catch (e) {}
+    load();
+    return () => { bus.toast = null; };
   }, []);
   const s = d?.settings;
   const th = resolveTheme(s || {});
@@ -145,482 +91,17 @@ export default function Page() {
     ["--gold", "--gold2", "--bg", "--card", "--line"].forEach((k) => st.removeProperty(k));
     Object.entries(th.vars).forEach(([k, v]) => st.setProperty(k, v));
   }, [th.id]);
-  if (boot || !d) return <Splash />;
   const icon = { winter: "❄", autumn: "🍂", spring: "🌸" }[s?.season] || th.fall;
   return (
     <>
-      {icon && <Fall icon={icon} />}
-      {toast && <div className="toast">{toast}</div>}
-      {!d.user ? <Login onDone={load} /> : d.user.role === "client" ? <Client d={d} reload={load} th={th} /> : <Owner d={d} reload={load} th={th} />}
+      {intro && <Intro onDone={() => setIntro(false)} />}
+      {!d ? <Splash /> : (
+        <>
+          {icon && <Fall icon={icon} />}
+          {toast && <div className="toast">{toast}</div>}
+          {!d.user ? <Login onDone={load} /> : d.user.role === "client" ? <Client d={d} reload={load} th={th} /> : <Owner d={d} reload={load} th={th} />}
+        </>
+      )}
     </>
-  );
-}
-
-function Login({ onDone }) {
-  const [l, setL] = useState(""), [p, setP] = useState(""), [err, setErr] = useState(""), [busy, setBusy] = useState(false);
-  const go = async () => {
-    setBusy(true);
-    const r = await api("/api/login", { login: l, password: p, initData: TG()?.initData });
-    setBusy(false);
-    r.ok ? onDone() : setErr(r.error || "Xatolik");
-  };
-  return (
-    <div className="center fade">
-      <img src="/logo.jpeg" className="logo-top" alt="" />
-      <h2 className="gold" style={{ textAlign: "center" }}>GOLD FIT</h2>
-      <input placeholder="Login" value={l} onChange={(x) => setL(x.target.value)} autoCapitalize="off" autoCorrect="off" />
-      <input placeholder="Parol" type="password" value={p} onChange={(x) => setP(x.target.value)} />
-      {err && <div className="bad">{err}</div>}
-      <button className="btn" disabled={busy || !l || !p} onClick={go}>Kirish</button>
-      <div className="mut" style={{ textAlign: "center" }}>Login va parolni zal ma'muriyatidan oling</div>
-    </div>
-  );
-}
-
-function Tabs({ tabs, tab, setTab }) {
-  return (
-    <div className="tabs">
-      {tabs.map(([k, ic, t]) => (
-        <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>
-          <span className="ti">{ic}</span><span>{t}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function Logout({ reload }) {
-  return <button className="btn ghost sm" onClick={async () => { await api("/api/me", { logout: true }); reload(); }}>Chiqish</button>;
-}
-
-function Notes({ notes }) {
-  if (!notes?.length) return <p className="mut">Hozircha xabarlar yo'q</p>;
-  return notes.map((n) => (
-    <div className="card" key={n.id}>
-      <b>{n.title}</b><div>{n.body}</div>
-      <div className="mut">{new Date(n.created_at).toLocaleString("uz-UZ")}</div>
-    </div>
-  ));
-}
-
-function Store({ reload }) {
-  const [st, setSt] = useState(null), [cart, setCart] = useState({});
-  const ld = async () => setSt(await api("/api/store"));
-  useEffect(() => { ld(); }, []);
-  if (!st) return null;
-  if (!st.enabled) return <p className="mut">Do'kon hozircha yopiq</p>;
-  const total = st.products.reduce((a, p) => a + (cart[p.id] || 0) * p.price, 0);
-  const add = (id, n) => setCart({ ...cart, [id]: Math.max(0, (cart[id] || 0) + n) });
-  const order = async () => {
-    const items = Object.entries(cart).filter(([, q]) => q > 0).map(([id, qty]) => ({ id, qty }));
-    const r = await api("/api/store", { items });
-    say(r.ok ? "✅ Buyurtma qabul qilindi" : r.error);
-    if (r.ok) { setCart({}); ld(); }
-  };
-  return (
-    <>
-      {!st.canOrder && <div className="card mut">Buyurtma berish uchun zalga kelib, kirishdagi QR kodni skanerlang.</div>}
-      {st.products.map((p) => (
-        <div className="card prod" key={p.id}>
-          {p.image_url && <img src={p.image_url} alt="" />}
-          <div style={{ flex: 1 }}>
-            <b>{p.name}</b>
-            <div className="mut">{p.category}</div>
-            <div className="gold">{p.price.toLocaleString()} so'm</div>
-          </div>
-          {p.stock <= 0 ? <span className="bad">Mahsulot qolmadi</span> : (
-            <div className="row">
-              <button className="btn ghost sm" disabled={!st.canOrder} onClick={() => add(p.id, -1)}>−</button>
-              <b>{cart[p.id] || 0}</b>
-              <button className="btn sm" disabled={!st.canOrder || (cart[p.id] || 0) >= p.stock} onClick={() => add(p.id, 1)}>+</button>
-            </div>
-          )}
-        </div>
-      ))}
-      {total > 0 && <button className="btn" onClick={order}>Buyurtma berish: {total.toLocaleString()} so'm</button>}
-    </>
-  );
-}
-
-function boom() {
-  try { TG()?.HapticFeedback?.notificationOccurred("success"); } catch (e) {}
-  const c = document.createElement("canvas");
-  c.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:300";
-  const w = (c.width = innerWidth), h = (c.height = innerHeight);
-  document.body.appendChild(c);
-  const x = c.getContext("2d");
-  const cols = ["#ffd400", "#ff9d00", "#ffffff", "#ff4d2e", "#3ddc84", "#35c6ff"];
-  const p = Array.from({ length: 140 }, () => ({
-    x: w / 2, y: h * 0.6, vx: (Math.random() - 0.5) * 16, vy: -8 - Math.random() * 12,
-    s: 4 + Math.random() * 6, r: Math.random() * 6, vr: (Math.random() - 0.5) * 0.4, c: cols[(Math.random() * cols.length) | 0],
-  }));
-  let t = 0;
-  const loop = () => {
-    x.clearRect(0, 0, w, h);
-    p.forEach((o) => { o.vy += 0.35; o.x += o.vx; o.y += o.vy; o.r += o.vr; x.save(); x.translate(o.x, o.y); x.rotate(o.r); x.fillStyle = o.c; x.fillRect(-o.s / 2, -o.s / 4, o.s, o.s / 2); x.restore(); });
-    if (++t < 130) requestAnimationFrame(loop); else c.remove();
-  };
-  loop();
-}
-
-function useCount(n, ms = 1000) {
-  const [v, setV] = useState(0);
-  useEffect(() => {
-    let raf, t0;
-    const f = (t) => { if (t0 === undefined) t0 = t; const k = Math.min(1, (t - t0) / ms); setV(Math.round(n * (1 - Math.pow(1 - k, 3)))); if (k < 1) raf = requestAnimationFrame(f); };
-    raf = requestAnimationFrame(f);
-    return () => cancelAnimationFrame(raf);
-  }, [n]);
-  return v;
-}
-
-function Stat({ icon, n, label }) {
-  const v = useCount(n || 0);
-  return <div className="stat"><div className="si">{icon}</div><b>{v}</b><span>{label}</span></div>;
-}
-
-function VipCard({ u, stats, active }) {
-  const P = planOf(u.plan), ref = useRef(null);
-  const left = u.paid_until ? Math.max(0, Math.round((new Date(u.paid_until) - new Date(today())) / 864e5)) : 0;
-  const pct = !active ? 0 : Math.max(0.07, Math.min(1, left / Math.max(P.days, 1)));
-  const C = 2 * Math.PI * 44;
-  const shown = useCount(left);
-  const mv = (e) => {
-    const r = ref.current.getBoundingClientRect(), a = (e.clientX - r.left) / r.width - 0.5, b = (e.clientY - r.top) / r.height - 0.5;
-    ref.current.style.transform = `perspective(800px) rotateY(${a * 16}deg) rotateX(${-b * 16}deg)`;
-    ref.current.style.setProperty("--mx", (a + 0.5) * 100 + "%");
-  };
-  return (
-    <>
-      <div ref={ref} className={"vip " + P.id + (active ? "" : " dead")} onPointerMove={mv} onPointerLeave={() => (ref.current.style.transform = "")} onClick={boom}>
-        <div className="vip-top">
-          <img src="/logo.jpeg" alt="" />
-          <span className="plan-chip">{P.icon} {P.name}</span>
-        </div>
-        <div className="vip-mid">
-          <div>
-            <div className="vip-name">{name(u)}</div>
-            <div className="vip-sub">{u.tg_username ? "@" + u.tg_username : u.phone}</div>
-          </div>
-          <div className="ring">
-            <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="44" className="rb" /><circle cx="50" cy="50" r="44" className="rf" style={{ strokeDasharray: C, strokeDashoffset: C * (1 - pct) }} /></svg>
-            <div className="rn"><b>{shown}</b><span>kun</span></div>
-          </div>
-        </div>
-        <div className="vip-bot">
-          <span>{active ? "Amal qiladi: " + u.paid_until : "⛔ Obuna tugagan"}</span>
-          <span>{P.price.toLocaleString()} so'm</span>
-        </div>
-      </div>
-      <div className="perks">{P.perks.map((x) => <span key={x}>✓ {x}</span>)}</div>
-      <div className="stats">
-        <Stat icon="🔥" n={stats?.streak} label="ketma-ket kun" />
-        <Stat icon="📅" n={stats?.month} label="shu oy" />
-        <Stat icon="🏆" n={stats?.total} label="jami kelish" />
-      </div>
-    </>
-  );
-}
-
-function downloadCsv(rows, file) {
-  const csv = "\ufeff" + rows.map((r) => r.map((x) => `"${String(x ?? "").replace(/"/g, '""')}"`).join(";")).join("\n");
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-  a.download = file;
-  a.click();
-}
-
-function Client({ d, reload, th }) {
-  const [tab, setTab] = useState("home");
-  const u = d.user, s = d.settings;
-  const active = u.paid_until && u.paid_until >= today();
-  const inGym = u.checked_in_until && new Date(u.checked_in_until) > new Date();
-  const scan = () => TG()?.showScanQrPopup
-    ? TG().showScanQrPopup({ text: "Zaldagi QR kodni skanerlang" }, (t) => {
-        TG().closeScanQrPopup();
-        api("/api/checkin", { qr: t }).then((r) => { say(r.ok ? "✅ Xush kelibsiz!" : r.error); if (r.ok) boom(); reload(); });
-        return true;
-      })
-    : say("Skaner faqat Telegram ichida ishlaydi");
-  const tabs = [["home", "🏠", "Bosh"], ...(s.store_enabled ? [["store", "🛒", "Do'kon"]] : []), ["notes", "🔔", "Xabarlar"]];
-  return (
-    <div className="wrap fade">
-      <div className="row between" style={{ marginBottom: 12 }}><h2 className="gold" style={{ margin: 0 }}>GOLD FIT</h2><div className="row"><span className={"tag " + (active ? "on" : "off")}>{planOf(u.plan).icon} {active ? planOf(u.plan).name : "To'lov kerak"}</span><Logout reload={reload} /></div></div>
-      {tab === "home" && th.banner && <div className="banner">{th.banner}</div>}
-      {tab === "home" && (
-        <>
-          <VipCard u={u} stats={d.stats} active={active} />
-          <button className="btn" onClick={scan}>📷 Zalga kirdim (QR skaner)</button>
-          <p className="mut">{inGym ? "✅ Siz zaldasiz, do'kondan buyurtma bera olasiz" : "Do'kondan buyurtma berish uchun avval QR kodni skanerlang"}</p>
-          <div className="card row between">
-            <span>Bildirishnoma ovozi</span>
-            <button className={"switch " + (!u.silent ? "on" : "")} onClick={async () => { await api("/api/me", { silent: !u.silent }); reload(); }} />
-          </div>
-          <button className="btn ghost" onClick={async () => { await api("/api/me", { logout: true }); reload(); }}>Hisobdan chiqish</button>
-        </>
-      )}
-      {tab === "store" && <Store reload={reload} />}
-      {tab === "notes" && <Notes notes={d.notes} />}
-      <Tabs tabs={tabs} tab={tab} setTab={setTab} />
-    </div>
-  );
-}
-
-function In({ f, setF, k, ph, type = "text" }) {
-  return <input placeholder={ph} type={type} value={f[k] || ""} onChange={(x) => setF({ ...f, [k]: x.target.value })} />;
-}
-
-function Owner({ d, reload, th }) {
-  const [tab, setTab] = useState("clients");
-  const [o, setO] = useState(null);
-  const [f, setF] = useState({}), [pf, setPf] = useState({}), [nf, setNf] = useState({ target: "all" }), [cf, setCf] = useState({}), [bf, setBf] = useState({});
-  const [payDays, setPayDays] = useState(0);
-  const [showAll, setShowAll] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const s = d.settings, isOwner = d.user.role === "owner";
-  const ld = async () => setO(await api("/api/owner"));
-  useEffect(() => { ld(); }, []);
-  const act = async (body, msg) => {
-    setBusy(true);
-    const r = await api("/api/owner", body);
-    setBusy(false);
-    say(r.ok ? msg || "✅ Saqlandi" : r.error);
-    await ld();
-    if (r.ok && ["setSetting", "changeCreds"].includes(body.action)) reload();
-    return r;
-  };
-  const set = (key, value) => act({ action: "setSetting", key, value }, "✅ Sozlama saqlandi");
-  if (!o) return <div className="wrap mut">Yuklanmoqda…</div>;
-  if (d.user.must_change)
-    return (
-      <div className="wrap fade">
-        <h2 className="gold">Xavfsizlik</h2>
-        <div className="card">
-          <b>Avval login va parolni o'zgartiring</b>
-          <p className="mut">Standart parol hammaga ma'lum. Yangi login va kamida 6 belgili parol yozing.</p>
-          <In f={cf} setF={setCf} k="login" ph="Yangi login" />
-          <In f={cf} setF={setCf} k="password" ph="Yangi parol (kamida 6 belgi)" type="password" />
-          <button className="btn" onClick={async () => { const r = await act({ action: "changeCreds", ...cf }); if (r.ok) setCf({}); }}>Saqlash</button>
-        </div>
-      </div>
-    );
-
-  const absent = o.clients.filter((c) => !c.blocked).map((c) => ({ c, n: since(c.last_visit ?? c.created_at) })).sort((a, b) => b.n - a.n).filter((x) => x.n >= 3);
-  const tabs = [["clients", "👥", "Mijozlar"], ["table", "📋", "Jadval"], ["att", "✅", "Davomat"], ["shop", "🛒", "Do'kon"], ["msg", "🔔", "Xabar"], ["set", "⚙️", "Sozlama"]];
-
-  return (
-    <div className={"wrap fade" + (busy ? " busy" : "")}>
-      {busy && <div className="topbar" />}
-      <div className="row between" style={{ marginBottom: 12 }}><h2 className="gold" style={{ margin: 0 }}>GOLD FIT boshqaruv</h2><Logout reload={reload} /></div>
-      {th.banner && <div className="banner">{th.banner}</div>}
-      {d.user.must_change && <div className="card bad">Xavfsizlik uchun "Sozlama" bo'limida login va parolni o'zgartiring.</div>}
-
-
-      {tab === "clients" && (() => {
-        const act2 = o.clients.filter((c) => !c.blocked && c.paid_until && c.paid_until >= today());
-        const by = Object.values(PLANS).map((p) => [p, act2.filter((c) => (c.plan || "monthly") === p.id).length]);
-        return (
-          <div className="card dash">
-            <div className="stats">
-              <div className="stat"><div className="si">👥</div><b>{act2.length}</b><span>faol</span></div>
-              <div className="stat"><div className="si">✅</div><b>{o.visits.length}</b><span>bugun keldi</span></div>
-              <div className="stat"><div className="si">💰</div><b>{Math.round((o.income || 0) / 1000)}k</b><span>oy tushumi</span></div>
-            </div>
-            <div className="row" style={{ marginTop: 10 }}>{by.map(([p, n]) => <span className="tag" key={p.id}>{p.icon} {p.name}: {n}</span>)}</div>
-          </div>
-        );
-      })()}
-
-      {tab === "table" && isOwner && (() => {
-        const list = o.clients.filter((c) => showAll || (!c.blocked && c.paid_until && c.paid_until >= today()));
-        const sum = list.reduce((a, c) => a + (o.paidMonth?.[c.id] || 0), 0);
-        const mon = today().slice(0, 7);
-        const csv = () => downloadCsv([["F.I.Sh", "Username", "TG ID", "Telefon", "Tarif", "To'lov (oy)", "Amal qiladi", "Davomat (oy)", "Karta"], ...list.map((c) => [name(c), c.tg_username ? "@" + c.tg_username : "", c.tg_id || "", c.phone, planOf(c.plan).name, o.paidMonth?.[c.id] || 0, c.paid_until || "", o.monthVisits?.[c.id] || 0, c.card_uid || ""]), ["", "", "", "", "JAMI", sum, "", "", ""]], `goldfit-${mon}.csv`);
-        return (
-          <>
-            <div className="row between" style={{ marginBottom: 8 }}>
-              <h3 style={{ margin: 0 }}>📋 {mon} oyi jadvali</h3>
-              <button className="btn sm" onClick={csv}>📥 Excel</button>
-            </div>
-            <label className="row mut" style={{ marginBottom: 8 }}><input type="checkbox" style={{ width: 20, margin: 0 }} checked={showAll} onChange={(x) => setShowAll(x.target.checked)} /> Kelmaganlar/bloklanganlarni ham ko'rsatish</label>
-            <div className="tbl"><table>
-              <thead><tr><th>#</th><th>F.I.Sh</th><th>Username</th><th>TG ID</th><th>Telefon</th><th>Tarif</th><th>To'lov</th><th>Muddat</th><th>Davomat</th><th>💳 Karta</th></tr></thead>
-              <tbody>
-                {list.map((c, i) => (
-                  <tr key={c.id} className={c.blocked ? "dim" : ""}>
-                    <td>{i + 1}</td><td>{name(c)}</td><td>{c.tg_username ? "@" + c.tg_username : "—"}</td><td>{c.tg_id || "—"}</td>
-                    <td>{c.phone} {c.tg_id ? "✅" : "⏳"}</td><td>{planOf(c.plan).icon} {planOf(c.plan).name}</td>
-                    <td>{(o.paidMonth?.[c.id] || 0).toLocaleString()}</td><td>{c.paid_until || "—"}</td><td>{o.monthVisits?.[c.id] || 0} kun</td>
-                    <td><input className="cardin" defaultValue={c.card_uid || ""} placeholder="—" onBlur={(x) => x.target.value !== (c.card_uid || "") && act({ action: "setCard", id: c.id, card_uid: x.target.value }, "✅ Karta biriktirildi")} /></td>
-                  </tr>
-                ))}
-                <tr className="sum"><td colSpan={6}>JAMI</td><td>{sum.toLocaleString()}</td><td colSpan={3}></td></tr>
-              </tbody>
-            </table></div>
-            <p className="mut">✅ — telefon Telegram bot orqali tasdiqlangan. Obunasi tugaganlar keyingi oyda jadvaldan avtomatik chiqib ketadi.</p>
-          </>
-        );
-      })()}
-
-      {tab === "clients" && (
-        <>
-          {isOwner && (
-            <div className="card">
-              <b>Yangi mijoz</b>
-              <In f={f} setF={setF} k="first_name" ph="Ism *" /><In f={f} setF={setF} k="last_name" ph="Familiya" />
-              <In f={f} setF={setF} k="phone" ph="Telefon raqami *" type="tel" />
-              <In f={f} setF={setF} k="login" ph="Login *" /><In f={f} setF={setF} k="password" ph="Parol *" />
-              <select value={f.plan || "monthly"} onChange={(x) => setF({ ...f, plan: x.target.value })}>
-                {Object.values(PLANS).map((p) => <option key={p.id} value={p.id}>{p.icon} {p.name} — {p.price.toLocaleString()} so'm / {p.days} kun</option>)}
-              </select>
-              <In f={f} setF={setF} k="card_uid" ph="💳 Braslet/karta raqami (ixtiyoriy)" />
-              <button className="btn" onClick={async () => { const r = await act({ action: "addClient", ...f }); if (r.ok) setF({}); }}>Mijozni qo'shish</button>
-            </div>
-          )}
-          {isOwner && <div className="row" style={{ marginBottom: 8 }}><span className="mut">Kun soni (0 = tarif bo'yicha):</span><input style={{ width: 80, margin: 0 }} type="number" value={payDays} onChange={(x) => setPayDays(x.target.value)} /></div>}
-          {o.clients.map((c) => (
-            <div className="card" key={c.id}>
-              <div className="row between"><b>{name(c)}</b><div className="row"><span className="tag">{planOf(c.plan).icon} {planOf(c.plan).name}</span><span className={"tag " + (c.blocked ? "off" : "on")}>{c.blocked ? "Bloklangan" : "Faol"}</span></div></div>
-              <div className="mut">{c.phone} · login: {c.login}{c.tg_username ? " · @" + c.tg_username : ""}</div>
-              <div className="mut">To'langan: {c.paid_until || "—"} · Oxirgi kelgan: {c.last_visit ? since(c.last_visit) + " kun oldin" : "hali kelmagan"}</div>
-              {isOwner && (
-                <div className="row" style={{ marginTop: 8 }}>
-                  <button className="btn sm" onClick={() => act({ action: "pay", id: c.id, plan: c.plan, days: +payDays || undefined }, "✅ To'lov yozildi")}>💰 {planOf(c.plan).name} to'lovi</button>
-                  <button className={"btn sm " + (c.blocked ? "" : "red")} onClick={() => act({ action: "block", id: c.id, blocked: !c.blocked })}>{c.blocked ? "Blokdan ochish" : "Bloklash"}</button>
-                </div>
-              )}
-            </div>
-          ))}
-        </>
-      )}
-
-      {tab === "att" && (
-        <>
-          <div className="card">
-            <b>📺 Zal kirishi uchun QR kod</b>
-            <p className="mut">Kod har 30 soniyada yangilanadi. Mijozlar ilovadagi "Zalga kirdim" tugmasi bilan shuni skanerlaydi.</p>
-            <QrLive />
-            {o.displayUrl && (
-              <div className="row" style={{ marginTop: 10 }}>
-                <button className="btn ghost" onClick={() => (TG()?.openLink ? TG().openLink(o.displayUrl) : window.open(o.displayUrl, "_blank"))}>Zal ekrani sahifasi</button>
-                <button className="btn ghost" onClick={() => { try { navigator.clipboard?.writeText(o.displayUrl); } catch (e) {} say("Havola nusxalandi"); }}>Havolani nusxalash</button>
-              </div>
-            )}
-          </div>
-          <h3>Bugun kelganlar ({o.visits.length})</h3>
-          {o.visits.length === 0 && <p className="mut">Bugun hali hech kim kelmagan</p>}
-          {o.visits.map((v, i) => <div className="card row between" key={i}><span>{name(v.users)}</span><span className="mut">{new Date(v.at).toLocaleTimeString("uz-UZ", { hour: "2-digit", minute: "2-digit" })}</span></div>)}
-          <h3 style={{ marginTop: 16 }}>Uzoq kelmaganlar</h3>
-          <p className="mut">{s.auto_block ? `${s.absent_days} kun kelmaganlar avtomatik bloklanadi` : "Avto-blok o'chirilgan"}</p>
-          {absent.length === 0 && <p className="mut">Hamma yaqinda kelgan</p>}
-          {absent.map(({ c, n }) => <div className="card row between" key={c.id}><span>{name(c)}</span><span className={n >= s.absent_days ? "bad" : "mut"}>{n} kun</span></div>)}
-        </>
-      )}
-
-      {tab === "shop" && isOwner && (
-        <>
-          <div className="card row between"><b>Do'kon mijozlarga ko'rinsin</b><button className={"switch " + (s.store_enabled ? "on" : "")} onClick={() => set("store_enabled", !s.store_enabled)} /></div>
-          <div className="card">
-            <b>Mahsulot qo'shish</b>
-            <In f={pf} setF={setPf} k="name" ph="Nomi *" /><In f={pf} setF={setPf} k="price" ph="Narxi (so'm)" type="number" />
-            <In f={pf} setF={setPf} k="stock" ph="Ombordagi soni" type="number" /><In f={pf} setF={setPf} k="category" ph="Kategoriya" />
-            <div className="row" style={{ marginBottom: 10 }}>
-              {pf.image_url && <img src={pf.image_url} alt="" style={{ width: 56, height: 56, borderRadius: 12, objectFit: "cover" }} />}
-              <Pick onUrl={(u) => setPf({ ...pf, image_url: u })}>📷 Rasm tanlash (galereya / fayl)</Pick>
-            </div>
-            <button className="btn" onClick={async () => { const r = await act({ action: "saveProduct", ...pf }); if (r.ok) setPf({}); }}>Qo'shish</button>
-          </div>
-          <h3>🧾 Kim nima xarid qildi</h3>
-          {(o.orders || []).length === 0 && <p className="mut">Hozircha buyurtma yo'q</p>}
-          {(o.orders || []).slice(0, 30).map((x) => (
-            <div className="card" key={x.id}>
-              <div className="row between"><b>{name(x.users) || "—"}</b><span className="gold">{(x.total || 0).toLocaleString()} so'm</span></div>
-              <div className="mut">{(x.items || []).map((i) => `${i.name} ×${i.qty}`).join(", ")}</div>
-              <div className="mut">{x.users?.phone} · {new Date(x.created_at).toLocaleString("uz-UZ")}</div>
-            </div>
-          ))}
-          <h3 style={{ marginTop: 16 }}>📦 Mahsulotlar</h3>
-          {o.products.map((p) => (
-            <div className="card" key={p.id}>
-              {p.image_url && <img src={p.image_url} alt="" style={{ width: "100%", maxHeight: 150, objectFit: "cover", borderRadius: 12, marginBottom: 8 }} />}
-              <div className="row between"><b>{p.name}</b><span className={p.stock > 0 ? "mut" : "bad"}>{p.stock > 0 ? `Ombor: ${p.stock}` : "Qolmadi"}</span></div>
-              <div className="mut">{p.category} · {p.price.toLocaleString()} so'm</div>
-              <div className="row" style={{ marginTop: 8 }}>
-                <button className="btn sm" onClick={() => act({ action: "saveProduct", ...p, stock: p.stock + 10 }, "✅ +10 qo'shildi")}>+10 ombor</button>
-                <Pick cls="btn ghost sm" onUrl={(u) => act({ action: "saveProduct", ...p, image_url: u }, "✅ Rasm yangilandi")}>📷 Rasm</Pick>
-                <button className="btn ghost sm" onClick={() => act({ action: "saveProduct", ...p, active: !p.active })}>{p.active ? "Yashirish" : "Ko'rsatish"}</button>
-                <button className="btn red sm" onClick={() => act({ action: "delProduct", id: p.id }, "O'chirildi")}>O'chirish</button>
-              </div>
-            </div>
-          ))}
-        </>
-      )}
-
-      {tab === "msg" && isOwner && (
-        <div className="card">
-          <b>Bildirishnoma yuborish</b>
-          <select value={nf.target} onChange={(x) => setNf({ ...nf, target: x.target.value })}>
-            <option value="all">Hammaga</option><option value="unpaid">To'lamaganlarga</option>
-            {o.clients.map((c) => <option key={c.id} value={c.id}>{name(c)} ({c.phone})</option>)}
-          </select>
-          <In f={nf} setF={setNf} k="title" ph="Sarlavha" />
-          <textarea rows={4} placeholder="Xabar matni" value={nf.body || ""} onChange={(x) => setNf({ ...nf, body: x.target.value })} />
-          <label className="row mut"><input type="checkbox" style={{ width: 20, margin: 0 }} checked={!!nf.silent} onChange={(x) => setNf({ ...nf, silent: x.target.checked })} /> Ovozsiz yuborish</label>
-          <button className="btn" style={{ marginTop: 8 }} onClick={async () => { const r = await act({ action: "notify", ...nf }, "✅ Yuborildi"); if (r.ok) setNf({ target: "all" }); }}>Yuborish</button>
-        </div>
-      )}
-
-      {tab === "set" && isOwner && (
-        <>
-          <div className="card">
-            <b>Telegram bot</b>
-            {s.bot_username ? <div className="good" style={{ margin: "6px 0" }}>✅ Ulangan: <a href={"https://t.me/" + s.bot_username} style={{ color: "inherit" }}>@{s.bot_username}</a></div> : <p className="mut">Bot hali ulanmagan. @BotFather → /newbot orqali bot oching va tokenini shu yerga yozing.</p>}
-            <In f={bf} setF={setBf} k="token" ph="Bot tokeni (123456:AAH...)" />
-            <button className="btn" disabled={!bf.token} onClick={async () => { const r = await act({ action: "connectBot", token: bf.token }, "✅ Bot ulandi!"); if (r.ok) setBf({}); }}>{s.bot_username ? "Tokenni almashtirish" : "Botni ulash"}</button>
-            {s.bot_username && <button className="btn red" style={{ marginTop: 8 }} onClick={() => act({ action: "disconnectBot" }, "Bot uzildi")}>Botni uzish</button>}
-          </div>
-          <div className="card">
-            <b>Ilova dizayni</b>
-            <select value={s.theme} onChange={(x) => set("theme", x.target.value)}>
-              <option value="auto">🤖 Avtomatik (bayramga qarab)</option>
-              <optgroup label="Asosiy dizaynlar">{THEMES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>
-              <optgroup label="Bayram shablonlari">{HOLIDAY_THEMES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>
-            </select>
-            <p className="mut">Hozir ko'rinayotgani: {th.name}. Ramazon va hayit sanalari taxminiy, o'zgarsa qo'lda tanlang.</p>
-            <select value={s.season} onChange={(x) => set("season", x.target.value)}>
-              <option value="none">Fasl effekti yo'q</option><option value="winter">❄ Qish (qor)</option><option value="autumn">🍂 Kuz (barglar)</option><option value="spring">🌸 Bahor</option>
-            </select>
-          </div>
-          <div className="card">
-            <b>Avtomatik bloklash</b>
-            <div className="row between" style={{ margin: "8px 0" }}><span>Kelmaganlarni bloklash</span><button className={"switch " + (s.auto_block ? "on" : "")} onClick={() => set("auto_block", !s.auto_block)} /></div>
-            <div className="mut">Necha kun kelmasa bloklansin</div>
-            <input type="number" defaultValue={s.absent_days} onBlur={(x) => set("absent_days", +x.target.value || 10)} />
-            <div className="mut">QR skanerlangach do'kon necha soat ochiq</div>
-            <input type="number" defaultValue={s.checkin_hours} onBlur={(x) => set("checkin_hours", +x.target.value || 3)} />
-          </div>
-          <div className="card">
-            <b>🚪 Eshik / turniket</b>
-            <p className="mut">Kontroller (ESP32 va h.k.) karta raqamini <code>POST /api/door</code> ga yuboradi (header: <code>x-door-key</code>, body: {"{"}"card":"..."{"}"}). Javobda <code>open:true</code> bo'lsa eshik ochiladi. Render'da <code>DOOR_KEY</code> o'zgaruvchisini qo'shing.</p>
-          </div>
-          <div className="card">
-            <b>Kirish ma'lumotlarini o'zgartirish</b>
-            <In f={cf} setF={setCf} k="login" ph="Yangi login" /><In f={cf} setF={setCf} k="password" ph="Yangi parol (kamida 6 belgi)" type="password" />
-            <button className="btn" onClick={async () => { const r = await act({ action: "changeCreds", ...cf }); if (r.ok) setCf({}); }}>Saqlash</button>
-          </div>
-          <div className="card">
-            <b>Bot foydalanuvchilari ({o.botUsers.length})</b>
-            {o.botUsers.map((b) => (
-              <div className="row between" key={b.tg_id} style={{ marginTop: 8 }}>
-                <div><div>{b.first_name || "—"} {b.username ? "@" + b.username : ""}</div><div className="mut">ID {b.tg_id} · {b.phone || "raqamsiz"}</div></div>
-                <button className={"btn sm " + (b.blocked ? "" : "red")} onClick={() => act({ action: "blockBot", tg_id: b.tg_id, blocked: !b.blocked })}>{b.blocked ? "Ochish" : "Bloklash"}</button>
-              </div>
-            ))}
-          </div>
-          <button className="btn ghost" onClick={async () => { await api("/api/me", { logout: true }); reload(); }}>Hisobdan chiqish</button>
-        </>
-      )}
-      <Tabs tabs={isOwner ? tabs : tabs.slice(0, 2)} tab={tab} setTab={setTab} />
-    </div>
   );
 }

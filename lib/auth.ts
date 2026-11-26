@@ -4,10 +4,12 @@ import { db } from "./db";
 import { getBotToken } from "./bot";
 
 const SECRET = process.env.APP_SECRET!;
-const hmac = (s: string) => crypto.createHmac("sha256", SECRET).update(s).digest("hex");
+export const hmac = (s: string) => crypto.createHmac("sha256", SECRET).update(s).digest("hex");
+
+export const sessionCookie = { httpOnly: true, secure: true, sameSite: "lax" as const, maxAge: 15552000, path: "/" };
 
 export function makeToken(uid: string) {
-  const p = `${uid}.${Date.now() + 30 * 864e5}`;
+  const p = `${uid}.${Date.now() + 180 * 864e5}`;
   return `${p}.${hmac(p)}`;
 }
 
