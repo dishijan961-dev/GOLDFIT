@@ -15,7 +15,7 @@ export default function Owner({ d, reload, th }) {
   const [f, setF] = useState({}), [pf, setPf] = useState({}), [nf, setNf] = useState({ target: "all" }), [cf, setCf] = useState({}), [bf, setBf] = useState({});
   const [payDays, setPayDays] = useState(0), [showAll, setShowAll] = useState(false), [showForm, setShowForm] = useState(false), [q, setQ] = useState("");
   const [busy, setBusy] = useState(false), [sup, setSup] = useState(false);
-  const [sec, setSec] = useState(null), [bk, setBk] = useState(false), [rf, setRf] = useState({}), [snd, setSnd] = useState(true);
+  const [sec, setSec] = useState(null), [bk, setBk] = useState(false), [rf, setRf] = useState({}), [snd, setSnd] = useState(true), [rmsg, setRmsg] = useState("");
   const s = d.settings, isOwner = d.user.role === "owner";
   const ld = async () => setO(await api("/api/owner"));
   useEffect(() => { ld(); setSup(pkSupported()); setSnd(soundOn()); }, []);
@@ -439,11 +439,17 @@ export default function Owner({ d, reload, th }) {
                 <In f={rf} setF={setRf} k="password" ph="Parolingiz" type="password" />
                 <div className="step"><i>3</i><b>Restart</b></div>
                 <Btn icon="restart" cls="red" disabled={!bk || rf.confirm !== "RESTART" || !rf.password} onClick={async () => {
-                  if (!confirm("Hamma ma'lumot o'chadi. Davom etamizmi?")) return;
+                  setRmsg("Bajarilmoqda…");
                   const r = await act({ action: "restart", ...rf }, "Restart bajarildi");
-                  if (r.ok) { setRf({}); setBk(false); setSec(null); }
+                  if (r.ok) { setRf({}); setBk(false); setRmsg("Tayyor: ma'lumotlar o'chirildi"); }
+                  else setRmsg("Xato: " + (r.error || "noma'lum"));
                 }}>Hamma ma'lumotni o'chirish</Btn>
-                {!bk && <p className="mut">Tugma zaxira olingandan keyin ochiladi.</p>}
+                <div className="mut" style={{ marginTop: 10, lineHeight: 1.8 }}>
+                  <div className={bk ? "good" : "bad"}>{bk ? "✓" : "✗"} 1. Zaxira olindi</div>
+                  <div className={rf.confirm === "RESTART" ? "good" : "bad"}>{rf.confirm === "RESTART" ? "✓" : "✗"} 2. RESTART so'zi yozildi (katta harflar bilan)</div>
+                  <div className={rf.password ? "good" : "bad"}>{rf.password ? "✓" : "✗"} 3. Parol yozildi</div>
+                </div>
+                {rmsg && <p><b>{rmsg}</b></p>}
               </div>
             </>
           )}
