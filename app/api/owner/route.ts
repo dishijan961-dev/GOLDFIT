@@ -310,13 +310,13 @@ export async function POST(req: Request) {
     case "topup": {
       // Mijoz naqd pul beradi, zal egasi shu summaga yarasha tanga soladi
       const rate = Math.max(1, +(await db.from("settings").select("value").eq("key", "coin_rate").maybeSingle()).data?.value || 1000);
-      const cash = Math.max(0, Math.floor(+b.cash || 0));
-      const coins = Math.floor(+b.coins || 0) || Math.floor(cash / rate);
+      const coins = Math.floor(+b.coins || 0) || Math.floor((+b.cash || 0) / rate);
+      const cash = b.coins ? Math.max(0, Math.floor(+b.cash || 0)) : Math.max(0, Math.floor(+b.cash || 0));
       if (!coins) return bad("Summa yoki tanga sonini kiriting");
-      const { data: c } = await db.from("users").select("coins,tg_id,silent,first_name").eq("id", b.id).eq("role", "client").single();
-      if (!c) return bad("Mijoz topilmadi");
+      const { data: c, error: ce } = await db.from("users").select("*").eq("id", b.id).eq("role", "client").maybeSingle();
+      if (!c) return bad(ce ? "Bazada xato: " + ce.message : "Mijoz topilmadi");
       const r = await db.from("users").update({ coins: Math.max(0, (c.coins || 0) + coins) }).eq("id", b.id);
-      if (r.error) return bad("Avval migration_v6.sql ni ishga tushiring");
+      if (r.error) return bad("Tanga ustuni yo'q. Supabase'da migration_v6.sql ni ishga tushiring");
       await db.from("coin_log").insert({ user_id: b.id, delta: coins, reason: cash ? `Naqd to'lov: ${cash} so'm` : "Bonus", cash });
       if (cash) await db.from("payments").insert({ user_id: b.id, amount: cash, days: 0, plan: "coins" });
       const text = `Hisobingizga ${coins} tanga qo'shildi. Balans: ${(c.coins || 0) + coins}. Do'kondan mahsulot olishda ishlating.`;

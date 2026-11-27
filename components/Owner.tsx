@@ -213,7 +213,14 @@ export default function Owner({ d, reload, th }) {
                     <Btn icon="wallet" cls="sm" onClick={() => act({ action: "pay", id: c.id, plan: c.plan, days: +payDays || undefined }, "To'lov yozildi")}>To'lov: {((c.gym_fee || planOf(c.plan).price) + (c.trainer ? c.trainer_fee || TRAINER_FEE : 0)).toLocaleString()}</Btn>
                   </div>
                   <div className="row" style={{ marginTop: 8 }}>
-                    <Btn icon="coin" cls="ghost sm" onClick={() => { const v = prompt(`${name(c)} naqd necha so'm berdi? (1 tanga = ${s.coin_rate || 1000} so'm)`); const n = +String(v || "").replace(/\D/g, ""); if (n) act({ action: "topup", id: c.id, cash: n }, "Tanga qo'shildi"); }}>Tanga solish</Btn>
+                    <Btn icon="coin" cls="ghost sm" onClick={() => {
+                      const rate = s.coin_rate || 1000;
+                      const v = prompt(`${name(c)} hisobiga necha tanga solamiz? (1 tanga = ${rate} so'm)`);
+                      const n = +String(v || "").replace(/\D/g, "");
+                      if (!n) return;
+                      const paid = confirm(`${n} tanga = ${(n * rate).toLocaleString("ru-RU")} so'm.\nMijoz shu summani naqd berdimi?\n\nOK: naqd berdi (tushumga yoziladi)\nBekor: bonus sifatida solinadi`);
+                      act({ action: "topup", id: c.id, coins: n, cash: paid ? n * rate : 0 }, `${n} tanga solindi`);
+                    }}>Tanga solish</Btn>
                   </div>
                   <div className="row" style={{ marginTop: 8 }}>
                     {c.trainer && trainers.length > 0 && (
