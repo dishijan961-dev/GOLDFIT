@@ -1,5 +1,6 @@
 import { db, getSettings } from "./db";
 import { assignLocker } from "./lockers";
+import { awardVisitCoin } from "./coins";
 
 // Zalga kirishni yozadi: shkaf raqami beriladi, do'kon va shkaf ochiladi
 export async function recordVisit(userId: string, method: "qr" | "card" | "manual", opts: { force?: boolean; num?: number } = {}) {
@@ -10,7 +11,8 @@ export async function recordVisit(userId: string, method: "qr" | "card" | "manua
   const { error } = await db.from("visits").insert({ user_id: userId, locker, method });
   if (error) await db.from("visits").insert({ user_id: userId }); // migratsiya qilinmagan bo'lsa ham davomat yoziladi
   await db.from("users").update({ last_visit: now.toISOString(), checked_in_until: until }).eq("id", userId);
-  return { until, locker };
+  const coin = await awardVisitCoin(userId);
+  return { until, locker, coin };
 }
 
 // Zaldan chiqdi: do'kon yopiladi, shkaf bo'shaydi

@@ -2,7 +2,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { resolveTheme } from "@/lib/themes";
-import { TG, api, bus, Fall, Btn, pkSupported, pkLogin } from "@/components/ui";
+import { TG, api, bus, Fall, Btn, pkSupported, pkLogin, lockOn, bmAvailable, bmAuth } from "@/components/ui";
 import Client from "@/components/Client";
 import Owner from "@/components/Owner";
 
@@ -39,6 +39,16 @@ function Intro({ onDone }) {
   );
 }
 
+function Lock({ onOpen }) {
+  return (
+    <div className="center fade">
+      <img src="/logo.jpeg" className="logo-top" alt="" />
+      <h2 className="gold" style={{ textAlign: "center", letterSpacing: 5, fontSize: 28 }}>GOLD FIT</h2>
+      <Btn icon="finger" onClick={onOpen}>Face ID / barmoq izi bilan ochish</Btn>
+    </div>
+  );
+}
+
 function Login({ onDone }) {
   const [l, setL] = useState(""), [p, setP] = useState(""), [err, setErr] = useState(""), [busy, setBusy] = useState(false), [bio, setBio] = useState(false);
   useEffect(() => { try { setBio(pkSupported() && !!localStorage.getItem("gf_pk")); } catch (e) {} }, []);
@@ -67,6 +77,7 @@ export default function Page() {
   const [intro, setIntro] = useState(true);
   const [d, setD] = useState(null);
   const [toast, setToast] = useState("");
+  const [locked, setLocked] = useState(false);
   const load = async () => {
     let r = await api("/api/me");
     if (!r.ok) r = await api("/api/me");
@@ -78,20 +89,27 @@ export default function Page() {
       if (a.ok) r = await api("/api/me");
     }
     setD(r);
+    // Keyingi ochilishda ilova darrov ko'rinsin: oxirgi ma'lumot qurilmada saqlanadi
+    try { if (r.ok && r.user) localStorage.setItem("gf_cache", JSON.stringify(r)); else localStorage.removeItem("gf_cache"); } catch (e) {}
   };
   useEffect(() => {
     // Chiqish bir zumda: ekran darhol yopiladi, server so'rovi fonda ketadi
     bus.logout = () => {
-      try { localStorage.setItem("gf_out", "1"); } catch (e) {}
+      try { localStorage.setItem("gf_out", "1"); localStorage.removeItem("gf_cache"); } catch (e) {}
       setD((p) => ({ ...p, user: null }));
       try { fetch("/api/me", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ logout: true }), keepalive: true }); } catch (e) {}
     };
     bus.toast = (t) => { setToast(String(t)); setTimeout(() => setToast(""), 3200); };
     TG()?.ready(); TG()?.expand();
     try { if (sessionStorage.getItem("gf_intro")) setIntro(false); } catch (e) {}
+    // 1) saqlangan ma'lumotni darrov ko'rsatamiz, 2) fonda yangisini olamiz
+    try { const c = localStorage.getItem("gf_cache"); if (c && localStorage.getItem("gf_out") !== "1") setD(JSON.parse(c)); } catch (e) {}
+    if (lockOn() && bmAvailable()) setLocked(true);
     load();
     return () => { bus.toast = null; };
   }, []);
+  const unlock = () => bmAuth((ok) => { if (ok) setLocked(false); });
+  useEffect(() => { if (locked && d?.user && !intro) unlock(); }, [locked, !!d?.user, intro]);
   const s = d?.settings;
   const th = resolveTheme(s || {});
   useEffect(() => {
@@ -107,7 +125,7 @@ export default function Page() {
         <>
           {icon && <Fall icon={icon} />}
           {toast && <div className="toast">{toast}</div>}
-          {!d.user ? <Login onDone={load} /> : d.user.role === "client" ? <Client d={d} reload={load} th={th} /> : <Owner d={d} reload={load} th={th} />}
+          {d.user && locked ? <Lock onOpen={unlock} /> : !d.user ? <Login onDone={load} /> : d.user.role === "client" ? <Client d={d} reload={load} th={th} /> : <Owner d={d} reload={load} th={th} />}
         </>
       )}
     </>

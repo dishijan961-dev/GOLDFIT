@@ -14,6 +14,6 @@ export async function POST(req: Request) {
   if (!m || +m[1] > cur || cur - +m[1] > 2 || qrFor(+m[1]) !== qr) return bad("QR eskirgan yoki noto'g'ri. Qayta skanerlang");
   if (!u.paid_until || u.paid_until < tzToday()) return bad("Oylik to'lov muddati tugagan", 403);
 
-  const { until, locker } = await recordVisit(u.id, "qr");
-  return NextResponse.json({ ok: true, until, locker });
+  const { until, locker, coin } = await recordVisit(u.id, "qr");
+  return NextResponse.json({ ok: true, until, locker, coin });
 }

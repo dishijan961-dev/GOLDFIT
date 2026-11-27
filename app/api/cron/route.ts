@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { db, getSettings, tzToday, addDays } from "@/lib/db";
 import { tg } from "@/lib/tg";
 import { releaseExpired } from "@/lib/lockers";
+import { fill } from "@/lib/broadcast";
+import { processDue } from "@/lib/scheduled";
 
 export async function GET(req: Request) {
   const key = new URL(req.url).searchParams.get("key");
@@ -32,10 +34,10 @@ export async function GET(req: Request) {
   }
 
   // 3) Muddat tugashiga 3 kun qolganda eslatma
-  const { data: soon } = await db.from("users").select("id,tg_id,silent")
+  const { data: soon } = await db.from("users").select("id,tg_id,silent,first_name")
     .eq("role", "client").eq("paid_until", addDays(today, +s.remind_days || 3));
   for (const c of s.remind_on === false ? [] : soon || []) {
-    const text = `Obuna muddatingiz ${+s.remind_days || 3} kundan keyin tugaydi. Iltimos, zalda to'lovni amalga oshiring.`;
+    const text = fill(s.tpl_remind, { ism: c.first_name || "Do'stim", kun: +s.remind_days || 3 });
     await db.from("notifications").insert({ user_id: c.id, title: "To'lov eslatmasi", body: text });
     if (c.tg_id) await tg("sendMessage", { chat_id: c.tg_id, text: `🔔 ${text}`, disable_notification: !!c.silent });
     res.reminded++;
@@ -49,7 +51,7 @@ export async function GET(req: Request) {
     for (const c of ab || []) {
       const ref = c.last_visit || c.created_at;
       if (!ref || ref >= lim || (c.absent_msg_at && c.absent_msg_at >= ref)) continue;
-      const text = `${c.first_name || "Do'stim"}, sizni sog'indik! Obunangiz hali amal qilmoqda. Zalda ko'rishguncha!`;
+      const text = fill(s.tpl_absent, { ism: c.first_name || "Do'stim", kun: +s.absent_msg_days || 7 });
       await db.from("notifications").insert({ user_id: c.id, title: "Sizni sog'indik", body: text });
       if (c.tg_id) await tg("sendMessage", { chat_id: c.tg_id, text: `💪 ${text}`, disable_notification: !!c.silent });
       await db.from("users").update({ absent_msg_at: new Date().toISOString() }).eq("id", c.id);
@@ -76,5 +78,6 @@ export async function GET(req: Request) {
       res.summary = true;
     }
   }
+  res.scheduled = await processDue(true);
   return NextResponse.json(res);
 }

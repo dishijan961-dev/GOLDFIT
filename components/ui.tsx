@@ -74,6 +74,10 @@ P.enter = "M10 4h8a2 2 0 012 2v12a2 2 0 01-2 2h-8|M4 12h10|M10 8l4 4-4 4";
 P.exit = "M14 4H6a2 2 0 00-2 2v12a2 2 0 002 2h8|M10 12h10|M16 8l4 4-4 4";
 P.history = "M3 12a9 9 0 109-9 9 9 0 00-7 3.5L3 8|M3 3v5h5|M12 7v5l3 2";
 P.calendar = "M4 5h16v16H4z|M4 10h16|M8 3v4|M16 3v4";
+P.coin = "M12 21a9 9 0 100-18 9 9 0 000 18|M12 6.5v11|M9.5 9.5h3.8a1.7 1.7 0 010 3.4H10.7a1.7 1.7 0 000 3.4H14.5";
+P.play = "M8 5v14l11-7z";
+P.list = "M4 6h16|M4 12h16|M4 18h10";
+P.edit = "M4 20h4L19 9l-4-4L4 16z|M13.5 6.5l4 4";
 const PIC = { daily: "bolt", monthly: "medal", premium: "crown", trainer: "dumbbell" };
 export const PlanIc = ({ id, s }) => <Ic n={PIC[id] || "medal"} s={s} />;
 
@@ -158,10 +162,19 @@ export function useCount(n, ms = 1000) {
   }, [n]);
   return v;
 }
-export function Stat({ icon, n, label, suffix = "" }) {
+export function Stat({ icon, n, label, suffix = "", text }) {
   const v = useCount(n || 0);
-  return <div className="stat"><div className="si"><Ic n={icon} /></div><b>{v.toLocaleString()}{suffix}</b><span>{label}</span></div>;
+  return <div className="stat"><div className="si"><Ic n={icon} /></div><b>{text ?? v.toLocaleString() + suffix}</b><span>{label}</span></div>;
 }
+// Pul: 1 000 000 -> "1 mln", 1 500 000 -> "1,5 mln", 400 000 -> "400 ming"
+export const fmt = (n) => {
+  n = Math.round(n || 0);
+  const a = Math.abs(n);
+  if (a >= 1e6) { const m = Math.round((n / 1e6) * 10) / 10; return String(m).replace(".", ",") + " mln"; }
+  if (a >= 1000 && a % 1000 === 0) return n / 1000 + " ming";
+  return n.toLocaleString("ru-RU");
+};
+export const money = (n) => fmt(n) + " so'm";
 
 export function downloadCsv(rows, file) {
   const csv = "\ufeff" + rows.map((r) => r.map((x) => `"${String(x ?? "").replace(/"/g, '""')}"`).join(";")).join("\n");
@@ -270,4 +283,69 @@ export function sfx(kind = "ok") {
       o.connect(g); g.connect(AC.destination); o.start(at); o.stop(at + 0.18);
     });
   } catch (e) {}
+}
+
+// ===== Mushak xaritasi (old va orqa) =====
+export const MUSCLES = { chest: "Ko'krak", shoulders: "Yelka", biceps: "Biceps", triceps: "Triceps", forearms: "Bilak", abs: "Press", traps: "Trapesiya", lats: "Orqa (keng)", lowback: "Bel", glutes: "Dumba", quads: "Son (old)", hamstrings: "Son (orqa)", calves: "Boldir" };
+const sh = (t, a, b, c, d, e) => t === "ellipse" ? { t, cx: a, cy: b, rx: c, ry: d } : t === "rect" ? { t, x: a, y: b, w: c, h: d, r: e } : { t, pts: a };
+const FRONT = { shoulders: [sh("ellipse", 27, 50, 9, 9), sh("ellipse", 73, 50, 9, 9)], chest: [sh("ellipse", 40, 63, 11, 9), sh("ellipse", 60, 63, 11, 9)], biceps: [sh("ellipse", 19, 74, 5.5, 12), sh("ellipse", 81, 74, 5.5, 12)], forearms: [sh("ellipse", 14, 102, 4.5, 14), sh("ellipse", 86, 102, 4.5, 14)], abs: [sh("rect", 42, 77, 16, 36, 5)], quads: [sh("ellipse", 39, 155, 10.5, 26), sh("ellipse", 61, 155, 10.5, 26)], calves: [sh("ellipse", 37, 207, 6.5, 17), sh("ellipse", 63, 207, 6.5, 17)] };
+const BACK = { traps: [sh("poly", "50,34 33,49 67,49")], shoulders: FRONT.shoulders, lats: [sh("ellipse", 39, 74, 9, 17), sh("ellipse", 61, 74, 9, 17)], triceps: FRONT.biceps, forearms: FRONT.forearms, lowback: [sh("rect", 42, 95, 16, 16, 5)], glutes: [sh("ellipse", 43, 127, 9, 10), sh("ellipse", 57, 127, 9, 10)], hamstrings: [sh("ellipse", 39, 160, 10.5, 24), sh("ellipse", 61, 160, 10.5, 24)], calves: FRONT.calves };
+function Fig({ map, on, label }) {
+  const el = (x, i, fill) => x.t === "ellipse" ? <ellipse key={i} cx={x.cx} cy={x.cy} rx={x.rx} ry={x.ry} fill={fill} /> : x.t === "rect" ? <rect key={i} x={x.x} y={x.y} width={x.w} height={x.h} rx={x.r} fill={fill} /> : <polygon key={i} points={x.pts} fill={fill} />;
+  return (
+    <div className="fig">
+      <svg viewBox="0 0 100 232">
+        <g fill="#dcdde2"><ellipse cx="50" cy="17" rx="10" ry="12" /><rect x="46" y="27" width="8" height="10" rx="3" /><path d="M29 40 Q50 33 71 40 L67 118 Q50 126 33 118 Z" /><ellipse cx="20" cy="72" rx="7" ry="19" /><ellipse cx="80" cy="72" rx="7" ry="19" /><ellipse cx="14" cy="103" rx="6" ry="16" /><ellipse cx="86" cy="103" rx="6" ry="16" /><ellipse cx="39" cy="158" rx="12.5" ry="35" /><ellipse cx="61" cy="158" rx="12.5" ry="35" /><ellipse cx="37" cy="205" rx="8" ry="23" /><ellipse cx="63" cy="205" rx="8" ry="23" /></g>
+        {Object.entries(map).map(([k, shapes]) => <g key={k}>{shapes.map((x, i) => el(x, i, on.includes(k) ? "#e5322d" : "#c4c6ce"))}</g>)}
+      </svg>
+      <span>{label}</span>
+    </div>
+  );
+}
+export const BodyMap = ({ muscles = [] }) => <div className="bodies"><Fig map={FRONT} on={muscles} label="Old" /><Fig map={BACK} on={muscles} label="Orqa" /></div>;
+
+// ===== Video (YouTube havola yoki mp4) =====
+export function VideoBox({ url, poster }) {
+  const [on, setOn] = useState(false);
+  if (!url && !poster) return null;
+  const yt = (url || "").match(/(?:youtu\.be\/|v=|embed\/|shorts\/)([\w-]{11})/);
+  const thumb = poster || (yt ? `https://img.youtube.com/vi/${yt[1]}/hqdefault.jpg` : "");
+  if (on && url) return yt
+    ? <div className="vbox"><iframe src={`https://www.youtube-nocookie.com/embed/${yt[1]}?autoplay=1&playsinline=1`} allow="autoplay; encrypted-media; fullscreen" allowFullScreen /></div>
+    : <div className="vbox"><video src={url} controls autoPlay playsInline /></div>;
+  return (
+    <div className="vbox" style={thumb ? { backgroundImage: `url(${thumb})` } : {}}>
+      {url && <button className="vplay" onClick={() => setOn(true)} aria-label="Video"><Ic n="play" /></button>}
+    </div>
+  );
+}
+
+// ===== Telegram biometrik qulf (Face ID / barmoq izi) =====
+export const bmAvailable = () => typeof window !== "undefined" && !!TG()?.BiometricManager;
+export const lockOn = () => { try { return localStorage.getItem("gf_lock") === "1"; } catch (e) { return false; } };
+export function bmEnable(cb) {
+  const bm = TG()?.BiometricManager;
+  if (!bm) return cb(false, "Bu faqat Telegram ichida ishlaydi");
+  bm.init(() => {
+    if (!bm.isBiometricAvailable) return cb(false, "Bu qurilmada Face ID yoki barmoq izi yo'q");
+    bm.requestAccess({ reason: "GOLD FIT ilovasini himoyalash" }, (ok) => cb(!!ok, ok ? "" : "Ruxsat berilmadi"));
+  });
+}
+export function bmAuth(cb) {
+  const bm = TG()?.BiometricManager;
+  if (!bm) return cb(true);
+  bm.init(() => {
+    if (!bm.isBiometricAvailable || !bm.isAccessGranted) return cb(true); // qulflab qo'ymaymiz
+    bm.authenticate({ reason: "Ilovani ochish" }, (ok) => cb(!!ok));
+  });
+}
+export function LockSwitch() {
+  const [on, setOn] = useState(false), [sup, setSup] = useState(false);
+  useEffect(() => { setOn(lockOn()); setSup(bmAvailable()); }, []);
+  if (!sup) return null;
+  const toggle = () => {
+    if (on) { try { localStorage.removeItem("gf_lock"); } catch (e) {} return setOn(false); }
+    bmEnable((ok, msg) => { if (ok) { try { localStorage.setItem("gf_lock", "1"); } catch (e) {} setOn(true); say("Yoqildi. Ilova endi Face ID / barmoq izi bilan ochiladi"); } else say(msg); });
+  };
+  return <div className="row between" style={{ margin: "10px 0" }}><div><b>Face ID / barmoq izi bilan ochish</b><div className="mut">Ilova har ochilganda tasdiqlanadi</div></div><Switch on={on} onClick={toggle} /></div>;
 }

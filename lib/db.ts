@@ -18,6 +18,7 @@ export async function getSettings() {
   const s: Record<string, any> = {
     store_enabled: true, theme: "gold", season: "none",
     absent_days: 10, auto_block: true, checkin_hours: 3,
+    coin_rate: 1000, coin_per_visit: 1, tpl_remind: "{ism}, obunangiz {kun} kundan keyin tugaydi. Zalda to'lovni amalga oshiring.", tpl_absent: "{ism}, sizni sog'indik! Obunangiz hali amal qilmoqda. Zalda ko'rishguncha!",
     lockers_enabled: false, absent_msg_on: true, absent_msg_days: 7, summary_on: true, lockers_count: 100, remind_on: true, remind_days: 3, bot_welcome: "",
   };
   // "_" bilan boshlanadigan kalitlar maxfiy (masalan bot tokeni), hech qachon qaytarilmaydi

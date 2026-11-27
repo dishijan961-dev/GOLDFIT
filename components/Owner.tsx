@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { PLANS, planOf, TRAINER_FEE, GYM_PLANS } from "@/lib/plans";
 import { THEMES, HOLIDAY_THEMES } from "@/lib/themes";
-import { TG, api, bus, say, today, since, name, Ic, PlanIc, Btn, Switch, Head, In, Tabs, Stat, Pick, QrLive, downloadCsv, downloadJson, pkSupported, pkEnroll, sfx, soundOn, setSound } from "./ui";
+import { fmt, money, MUSCLES, LockSwitch, TG, api, bus, say, today, since, name, Ic, PlanIc, Btn, Switch, Head, In, Tabs, Stat, Pick, QrLive, downloadCsv, downloadJson, pkSupported, pkEnroll, sfx, soundOn, setSound } from "./ui";
 
 const Row = ({ title, sub, children }) => (
   <div className="row between" style={{ margin: "10px 0" }}><div><b>{title}</b>{sub && <div className="mut">{sub}</div>}</div>{children}</div>
@@ -15,7 +15,7 @@ export default function Owner({ d, reload, th }) {
   const [f, setF] = useState({}), [pf, setPf] = useState({}), [nf, setNf] = useState({ target: "all" }), [cf, setCf] = useState({}), [bf, setBf] = useState({});
   const [payDays, setPayDays] = useState(0), [showAll, setShowAll] = useState(false), [showForm, setShowForm] = useState(false), [q, setQ] = useState("");
   const [busy, setBusy] = useState(false), [sup, setSup] = useState(false);
-  const [pl, setPl] = useState(""), [hist, setHist] = useState(null), [hr, setHr] = useState("day"), [hd, setHd] = useState(today()), [mi, setMi] = useState(""), [ef, setEf] = useState({}), [eg, setEg] = useState("");
+  const [sel, setSel] = useState([]), [ac, setAc] = useState(""), [an, setAn] = useState(""), [msgTab, setMsgTab] = useState("now"), [sm, setSm] = useState({ target: "all", repeat: "none" }), [pl, setPl] = useState(""), [hist, setHist] = useState(null), [hr, setHr] = useState("day"), [hd, setHd] = useState(today()), [mi, setMi] = useState(""), [ef, setEf] = useState({}), [eg, setEg] = useState("");
   const [sec, setSec] = useState(null), [bk, setBk] = useState(false), [rf, setRf] = useState({}), [snd, setSnd] = useState(true), [rmsg, setRmsg] = useState("");
   const s = d.settings, isSuper = d.user.role === "owner", isOwner = isSuper || d.user.role === "manager";
   const ld = async () => setO(await api("/api/owner"));
@@ -75,8 +75,8 @@ export default function Owner({ d, reload, th }) {
   const busyL = lockers.filter((l) => l.user_id).length;
   const T = isOwner
     ? [["home", "home", "Bosh"], ["clients", "users", "Mijozlar"], ["table", "table", "Jadval"], ["att", "check", "Davomat"], ["lockers", "locker", "Shkaflar"], ["shop", "cart", "Do'kon"], ["exercises", "dumbbell", "Mashq"], ["msg", "bell", "Xabar"], ...(isSuper ? [["bot", "bot", "Bot"], ["set", "sliders", "Sozlama"]] : [])]
-    : [["clients", "users", "Mijozlar"], ["att", "check", "Davomat"]];
-  const cur = isOwner ? (["bot", "set"].includes(tab) && !isSuper ? "home" : tab) : ["clients", "att"].includes(tab) ? tab : "clients";
+    : [["clients", "users", "Mijozlar"], ["att", "check", "Davomat"], ["exercises", "dumbbell", "Mashq"]];
+  const cur = isOwner ? (["bot", "set"].includes(tab) && !isSuper ? "home" : tab) : ["clients", "att", "exercises"].includes(tab) ? tab : "clients";
   const mon = today().slice(0, 7);
 
   return (
@@ -97,7 +97,7 @@ export default function Owner({ d, reload, th }) {
           <div className="stats four">
             <Stat icon="users" n={actives.length} label="faol a'zo" />
             <Stat icon="check" n={o.visits.length} label="bugun keldi" />
-            <Stat icon="wallet" n={Math.round((o.income || 0) / 1000)} suffix="k" label="oy tushumi (so'm)" />
+            <Stat icon="wallet" text={money(o.income || 0)} label="oy tushumi" />
             <Stat icon="locker" n={s.lockers_enabled ? busyL : 0} label={s.lockers_enabled ? `band shkaf / ${lockers.length}` : "shkaf o'chiq"} />
           </div>
           <div className="card">
@@ -197,8 +197,12 @@ export default function Owner({ d, reload, th }) {
               </div></div>
               <div className="mut">{c.phone} · login: {c.login}{c.tg_username ? " · @" + c.tg_username : ""}</div>
               <div className="mut">To'langan: {c.paid_until || "—"} · Oxirgi kelgan: {c.last_visit ? since(c.last_visit) + " kun oldin" : "hali kelmagan"}</div>
-              {isOwner && (() => { const g = c.gym_fee || planOf(c.plan).price, t = c.trainer ? c.trainer_fee || TRAINER_FEE : 0; return (
-                <div className="mut">Zal: {g.toLocaleString()}{c.trainer ? ` + Trener${c.trainer_name ? " (" + c.trainer_name + ")" : ""}: ${t.toLocaleString()}` : ""} = <b className="gold">{(g + t).toLocaleString()} so'm</b></div>
+              {isOwner && (() => { const g = c.gym_fee || planOf(c.plan).price, t = c.trainer ? c.trainer_fee || TRAINER_FEE : 0, tt = o.totals?.[c.id] || { gym: 0, trainer: 0, coins: 0, shop: 0 }; return (
+                <>
+                  <div className="mut">Joriy tarif: zal {fmt(g)}{c.trainer ? ` + trener${c.trainer_name ? " (" + c.trainer_name + ")" : ""} ${fmt(t)}` : ""} = <b className="gold">{money(g + t)}</b></div>
+                  <div className="mut">Umumiy hisob: zal {fmt(tt.gym)} · trener {fmt(tt.trainer)} · do'kon {fmt(tt.shop)} · tanga {fmt(tt.coins)} = <b className="gold">{money(tt.gym + tt.trainer + tt.shop + tt.coins)}</b></div>
+                  <div className="mut">Tanga balansi: <b>{c.coins || 0}</b></div>
+                </>
               ); })()}
               {isOwner && (
                 <>
@@ -207,6 +211,9 @@ export default function Owner({ d, reload, th }) {
                       ? <Btn icon="exit" cls="dark sm" onClick={() => manual(c, true)}>Zaldan chiqdi</Btn>
                       : <Btn icon="enter" cls="sm" onClick={() => manual(c, false)}>Zalga kirdi</Btn>}
                     <Btn icon="wallet" cls="sm" onClick={() => act({ action: "pay", id: c.id, plan: c.plan, days: +payDays || undefined }, "To'lov yozildi")}>To'lov: {((c.gym_fee || planOf(c.plan).price) + (c.trainer ? c.trainer_fee || TRAINER_FEE : 0)).toLocaleString()}</Btn>
+                  </div>
+                  <div className="row" style={{ marginTop: 8 }}>
+                    <Btn icon="coin" cls="ghost sm" onClick={() => { const v = prompt(`${name(c)} naqd necha so'm berdi? (1 tanga = ${s.coin_rate || 1000} so'm)`); const n = +String(v || "").replace(/\D/g, ""); if (n) act({ action: "topup", id: c.id, cash: n }, "Tanga qo'shildi"); }}>Tanga solish</Btn>
                   </div>
                   <div className="row" style={{ marginTop: 8 }}>
                     {c.trainer && trainers.length > 0 && (
@@ -372,6 +379,14 @@ export default function Owner({ d, reload, th }) {
           <Head icon="cart" title="Do'kon" sub="Mahsulotlar va xaridlar" />
           <div className="card"><Row title="Do'kon mijozlarga ko'rinsin"><Switch on={s.store_enabled} onClick={() => set("store_enabled", !s.store_enabled)} /></Row></div>
           <div className="card">
+            <b>Tanga (ball) tizimi</b>
+            <p className="mut">Mijoz har kelgan kuni tanga oladi. Tangani do'kondan mahsulot olishda ishlatadi. Naqd pul bergan mijozga "Mijozlar" bo'limidan tanga solasiz.</p>
+            <div className="mut">1 tanga necha so'm</div>
+            <input type="number" defaultValue={s.coin_rate} onBlur={(x) => +x.target.value !== s.coin_rate && set("coin_rate", +x.target.value || 1000)} />
+            <div className="mut">Har kelganiga necha tanga</div>
+            <input type="number" defaultValue={s.coin_per_visit} onBlur={(x) => +x.target.value !== s.coin_per_visit && set("coin_per_visit", +x.target.value || 1)} />
+          </div>
+          <div className="card">
             <b>Mahsulot qo'shish</b>
             <In f={pf} setF={setPf} k="name" ph="Nomi *" /><In f={pf} setF={setPf} k="price" ph="Narxi (so'm)" type="number" />
             <In f={pf} setF={setPf} k="stock" ph="Ombordagi soni" type="number" /><In f={pf} setF={setPf} k="category" ph="Kategoriya" />
@@ -407,39 +422,64 @@ export default function Owner({ d, reload, th }) {
         </div>
       )}
 
-      {cur === "exercises" && isOwner && (
+      {cur === "exercises" && (
         <div className="fade">
-          <Head icon="dumbbell" title="Mashqlar" sub="Mijozlar ilovada shu mashqlarni ko'radi" />
-          <div className="card">
-            <b>Yangi mashq</b>
-            <In f={ef} setF={setEf} k="title" ph="Mashq nomi *" />
-            <select value={ef.grp || ""} onChange={(x) => setEf({ ...ef, grp: x.target.value })}>
-              <option value="">Mushak guruhi…</option>
-              {["Ko'krak", "Orqa", "Oyoq", "Yelka", "Qo'l", "Press", "Kardio", "Boshqa"].map((g) => <option key={g} value={g}>{g}</option>)}
-            </select>
-            <div className="row"><input style={{ flex: 1 }} placeholder="Yondashuv" type="number" value={ef.sets || ""} onChange={(x) => setEf({ ...ef, sets: x.target.value })} /><input style={{ flex: 1 }} placeholder="Takror (10-12)" value={ef.reps || ""} onChange={(x) => setEf({ ...ef, reps: x.target.value })} /></div>
-            <textarea rows={3} placeholder="Qanday bajariladi (maslahat)" value={ef.note || ""} onChange={(x) => setEf({ ...ef, note: x.target.value })} />
-            <div className="row" style={{ marginBottom: 10 }}>
-              {ef.image_url && <img src={ef.image_url} alt="" style={{ width: 56, height: 56, borderRadius: 12, objectFit: "cover" }} />}
-              <Pick onUrl={(u) => setEf({ ...ef, image_url: u })}>Rasm tanlash</Pick>
+          <Head icon="dumbbell" title="Mashqlar" sub={isOwner ? "Kutubxona va mijozga dastur yuborish" : "Mijozlaringizga dastur yuboring"} />
+          {isOwner && (
+            <div className="card">
+              <b>{ef.id ? "Mashqni tahrirlash" : "Yangi mashq"}</b>
+              <In f={ef} setF={setEf} k="title" ph="Mashq nomi *" />
+              <select value={ef.grp || ""} onChange={(x) => setEf({ ...ef, grp: x.target.value })}>
+                <option value="">Kategoriya…</option>
+                {["Ko'krak", "Orqa", "Oyoq", "Yelka", "Qo'l", "Press", "Kardio", "Boshqa"].map((g) => <option key={g} value={g}>{g}</option>)}
+              </select>
+              <div className="mut">Ishlaydigan mushaklar (mushak xaritasida qizil bo'ladi)</div>
+              <div className="chips" style={{ marginTop: 8 }}>
+                {Object.entries(MUSCLES).map(([k, t]) => { const on = (ef.muscles || []).includes(k); return <button key={k} className={on ? "on" : ""} onClick={() => setEf({ ...ef, muscles: on ? ef.muscles.filter((m) => m !== k) : [...(ef.muscles || []), k] })}>{t}</button>; })}
+              </div>
+              <div className="row"><input style={{ flex: 1 }} placeholder="Yondashuv" type="number" value={ef.sets || ""} onChange={(x) => setEf({ ...ef, sets: x.target.value })} /><input style={{ flex: 1 }} placeholder="Takror (10-12)" value={ef.reps || ""} onChange={(x) => setEf({ ...ef, reps: x.target.value })} /></div>
+              <In f={ef} setF={setEf} k="equipment" ph="Jihoz (shtanga, skameyka…)" />
+              <textarea rows={5} placeholder={"Qanday bajariladi: har qadamni yangi qatordan yozing\n1-qadam…\n2-qadam…"} value={ef.steps || ""} onChange={(x) => setEf({ ...ef, steps: x.target.value })} />
+              <In f={ef} setF={setEf} k="video_url" ph="Video havolasi (YouTube yoki mp4), ixtiyoriy" />
+              <div className="row" style={{ marginBottom: 10 }}>
+                {ef.image_url && <img src={ef.image_url} alt="" style={{ width: 56, height: 56, borderRadius: 12, objectFit: "cover" }} />}
+                <Pick onUrl={(u) => setEf({ ...ef, image_url: u })}>Rasm tanlash</Pick>
+              </div>
+              <Btn icon={ef.id ? "check2" : "plus"} onClick={async () => { const r = await act({ action: "saveExercise", ...ef }, ef.id ? "Saqlandi" : "Mashq qo'shildi"); if (r.ok) setEf({}); }}>{ef.id ? "Saqlash" : "Qo'shish"}</Btn>
+              {ef.id && <Btn icon="x" cls="ghost" style={{ marginTop: 8 }} onClick={() => setEf({})}>Bekor qilish</Btn>}
             </div>
-            <Btn icon="plus" onClick={async () => { const r = await act({ action: "saveExercise", ...ef }, "Mashq qo'shildi"); if (r.ok) setEf({}); }}>Qo'shish</Btn>
-          </div>
-          {(o.exercises || []).length === 0 && <Btn icon="download" cls="ghost" onClick={() => act({ action: "seedExercises" }, "Standart mashqlar qo'shildi")}>Standart mashqlarni qo'shish (12 ta)</Btn>}
-          {(o.exercises || []).length > 0 && (
-            <div className="chips">{["", ...new Set((o.exercises || []).map((x) => x.grp).filter(Boolean))].map((g) => <button key={g} className={eg === g ? "on" : ""} onClick={() => setEg(g)}>{g || "Hammasi"}</button>)}</div>
           )}
+          {(o.exercises || []).length === 0 && isOwner && <Btn icon="download" cls="ghost" onClick={() => act({ action: "seedExercises" }, "Standart mashqlar qo'shildi")}>Standart mashqlarni qo'shish (12 ta)</Btn>}
+
+          <div className="card" style={{ marginTop: 12 }}>
+            <b>Mijozga mashq yuborish</b>
+            <p className="mut">Mashqlarni tanlang va mijozga yuboring. Mijoz ilovada "Mening dasturim"da ko'radi, Telegramga xabar boradi.</p>
+            <select value={ac} onChange={(x) => setAc(x.target.value)}>
+              <option value="">Mijozni tanlang…</option>
+              {o.clients.map((c) => <option key={c.id} value={c.id}>{name(c)} ({c.phone})</option>)}
+            </select>
+            <div className="chips">{["", ...new Set((o.exercises || []).map((x) => x.grp).filter(Boolean))].map((g) => <button key={g} className={eg === g ? "on" : ""} onClick={() => setEg(g)}>{g || "Hammasi"}</button>)}</div>
+            <div className="chips">
+              {(o.exercises || []).filter((x) => x.active && (!eg || x.grp === eg)).map((x) => { const on = sel.includes(x.id); return <button key={x.id} className={on ? "on" : ""} onClick={() => setSel(on ? sel.filter((i) => i !== x.id) : [...sel, x.id])}>{x.title}</button>; })}
+            </div>
+            <textarea rows={2} placeholder="Izoh (masalan: haftasiga 3 marta)" value={an} onChange={(x) => setAn(x.target.value)} />
+            <Btn icon="send" disabled={!ac || !sel.length} onClick={async () => { const r = await act({ action: "assignExercises", user_id: ac, exercise_ids: sel, note: an }, "Mashqlar yuborildi"); if (r.ok) { setSel([]); setAn(""); } }}>{sel.length ? `${sel.length} ta mashqni yuborish` : "Mashqlarni tanlang"}</Btn>
+          </div>
+
+          <h3>Kutubxona</h3>
           {(o.exercises || []).filter((x) => !eg || x.grp === eg).map((x) => (
             <div className="card ex" key={x.id}>
               {x.image_url && <img src={x.image_url} alt="" />}
               <div style={{ flex: 1 }}>
                 <div className="row between"><b>{x.title}</b><span className="tag">{x.grp || "—"}</span></div>
-                <div className="mut">{x.sets ? x.sets + " yondashuv" : ""}{x.reps ? " × " + x.reps : ""}</div>
-                {x.note && <div className="mut">{x.note}</div>}
-                <div className="row" style={{ marginTop: 8 }}>
-                  <Btn icon="lock" cls="ghost sm" onClick={() => act({ action: "saveExercise", ...x, active: !x.active })}>{x.active ? "Yashirish" : "Ko'rsatish"}</Btn>
-                  <Btn icon="trash" cls="red sm" onClick={() => confirm("O'chiramizmi?") && act({ action: "delExercise", id: x.id }, "O'chirildi")}>{""}</Btn>
-                </div>
+                <div className="mut">{x.sets ? x.sets + " yondashuv" : ""}{x.reps ? " × " + x.reps : ""}{(x.muscles || []).length ? " · " + x.muscles.map((m) => MUSCLES[m] || m).join(", ") : ""}</div>
+                {isOwner && (
+                  <div className="row" style={{ marginTop: 8 }}>
+                    <Btn icon="edit" cls="sm" onClick={() => { setEf({ ...x, muscles: x.muscles || [] }); window.scrollTo({ top: 0 }); }}>{""}</Btn>
+                    <Btn icon="lock" cls="ghost sm" onClick={() => act({ action: "saveExercise", ...x, active: !x.active })}>{x.active ? "Yashirish" : "Ko'rsatish"}</Btn>
+                    <Btn icon="trash" cls="red sm" onClick={() => confirm("O'chiramizmi?") && act({ action: "delExercise", id: x.id }, "O'chirildi")}>{""}</Btn>
+                  </div>
+                )}
               </div>
             </div>
           ))}
@@ -457,7 +497,8 @@ export default function Owner({ d, reload, th }) {
         return (
           <div className="fade">
             <Head icon="send" title="Hammaga xabar" sub="Ilovaga va Telegramga yuboriladi" />
-            <div className="card">
+            <div className="seg"><button className={msgTab === "now" ? "on" : ""} onClick={() => setMsgTab("now")}>Hozir yuborish</button><button className={msgTab === "auto" ? "on" : ""} onClick={() => setMsgTab("auto")}>Avto va reja</button></div>
+            {msgTab === "now" && (<div className="card">
               <b>Kimga</b>
               <div className="chips" style={{ marginTop: 8 }}>{TG_.map(([k, t]) => <button key={k} className={nf.target === k ? "on" : ""} onClick={() => setNf({ ...nf, target: k })}>{t}</button>)}</div>
               <select value={TG_.some(([k]) => k === nf.target) ? "" : nf.target} onChange={(x) => x.target.value && setNf({ ...nf, target: x.target.value })}>
@@ -476,7 +517,40 @@ export default function Owner({ d, reload, th }) {
                 const r = await act({ action: "notify", ...nf }, "Yuborildi");
                 if (r.ok) { setNf({ target: nf.target }); say(`Yuborildi. Telegramga: ${r.sent || 0} kishi`); }
               }}>Yuborish</Btn>
-            </div>
+            </div>)}
+            {msgTab === "auto" && (
+              <>
+                <div className="card">
+                  <b>Avtomatik xabar matnlari</b>
+                  <p className="mut">Tizim o'zi yuboradi. <code>{"{ism}"}</code> mijoz ismi, <code>{"{kun}"}</code> kunlar soni.</p>
+                  <Row title="Obuna tugashi eslatmasi" sub={`${s.remind_days} kun oldin`}><Switch on={s.remind_on !== false} onClick={() => set("remind_on", !(s.remind_on !== false))} /></Row>
+                  <textarea rows={3} defaultValue={s.tpl_remind} onBlur={(x) => x.target.value !== s.tpl_remind && set("tpl_remind", x.target.value)} />
+                  <Row title="Kelmaganlarga xabar" sub={`${s.absent_msg_days} kun kelmasa`}><Switch on={s.absent_msg_on !== false} onClick={() => set("absent_msg_on", !(s.absent_msg_on !== false))} /></Row>
+                  <textarea rows={3} defaultValue={s.tpl_absent} onBlur={(x) => x.target.value !== s.tpl_absent && set("tpl_absent", x.target.value)} />
+                  <div className="mut">Necha kun kelmasa yuborilsin</div>
+                  <input type="number" defaultValue={s.absent_msg_days} onBlur={(x) => set("absent_msg_days", +x.target.value || 7)} />
+                </div>
+                <div className="card">
+                  <b>Rejalashtirilgan xabar</b>
+                  <p className="mut">Xabarni hozir yozib saqlab qo'ying, tizim belgilangan vaqtda o'zi yuboradi.</p>
+                  <div className="chips">{TG_.map(([k, t]) => <button key={k} className={sm.target === k ? "on" : ""} onClick={() => setSm({ ...sm, target: k })}>{t}</button>)}</div>
+                  <In f={sm} setF={setSm} k="title" ph="Sarlavha *" />
+                  <textarea rows={4} placeholder="Xabar matni" value={sm.body || ""} onChange={(x) => setSm({ ...sm, body: x.target.value })} />
+                  <div className="mut">Yuborish vaqti (Toshkent)</div>
+                  <input type="datetime-local" value={sm.at || ""} onChange={(x) => setSm({ ...sm, at: x.target.value })} />
+                  <select value={sm.repeat} onChange={(x) => setSm({ ...sm, repeat: x.target.value })}><option value="none">Bir marta</option><option value="daily">Har kuni</option><option value="weekly">Har hafta</option></select>
+                  <Btn icon="clock" disabled={!sm.title || !sm.at} onClick={async () => { const r = await act({ action: "saveScheduled", ...sm, send_at: new Date(sm.at + ":00+05:00").toISOString() }, "Saqlandi. Tizim o'zi yuboradi"); if (r.ok) setSm({ target: "all", repeat: "none" }); }}>Saqlab qo'yish</Btn>
+                </div>
+                {(o.scheduled || []).map((m) => (
+                  <div className="card" key={m.id}>
+                    <div className="row between"><b>{m.title}</b><span className={"tag " + (m.sent ? "on" : "")}>{m.sent ? "Yuborilgan" : m.repeat === "daily" ? "Har kuni" : m.repeat === "weekly" ? "Har hafta" : "Kutilmoqda"}</span></div>
+                    <div className="mut">{m.body}</div>
+                    <div className="row between"><span className="mut">{new Date(m.send_at).toLocaleString("uz-UZ", { timeZone: "Asia/Tashkent" })} · {TG_.find(([k]) => k === m.target)?.[1] || "mijoz"}</span>
+                      <Btn icon="trash" cls="red sm" onClick={() => act({ action: "delScheduled", id: m.id }, "O'chirildi")}>{""}</Btn></div>
+                  </div>
+                ))}
+              </>
+            )}
           </div>
         );
       })()}
@@ -647,7 +721,8 @@ export default function Owner({ d, reload, th }) {
               <Head icon="shield" title="Xavfsizlik" sub="Kirish usullari" />
               <div className="card">
                 <b>Xavfsizlik</b>
-                {sup && <Row title="Face ID / barmoq izi" sub="Shu qurilmada parolsiz kirish"><Btn icon="finger" cls="sm" onClick={async () => { const r = await pkEnroll(); say(r.ok ? "Yoqildi" : r.error); }}>Yoqish</Btn></Row>}
+                <LockSwitch />
+            {sup && <Row title="Face ID / barmoq izi" sub="Shu qurilmada parolsiz kirish"><Btn icon="finger" cls="sm" onClick={async () => { const r = await pkEnroll(); say(r.ok ? "Yoqildi" : r.error); }}>Yoqish</Btn></Row>}
                 <div className="mut" style={{ marginTop: 10 }}>Kirish ma'lumotlarini o'zgartirish</div>
                 <In f={cf} setF={setCf} k="login" ph="Yangi login" /><In f={cf} setF={setCf} k="password" ph="Yangi parol (kamida 6 belgi)" type="password" />
                 <Btn icon="lock" onClick={async () => { const r = await act({ action: "changeCreds", ...cf }); if (r.ok) setCf({}); }}>Saqlash</Btn>

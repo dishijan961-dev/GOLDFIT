@@ -5,14 +5,16 @@ import { getUser } from "@/lib/auth";
 import { tg } from "@/lib/tg";
 import { planOf, TRAINER_FEE } from "@/lib/plans";
 import { recordVisit, recordExit } from "@/lib/visit";
+import { broadcast } from "@/lib/broadcast";
+import { tg as tgCall } from "@/lib/tg";
 import { ensureLockers, releaseExpired } from "@/lib/lockers";
 import { encrypt, clearBotCache, getBotToken, webhookSecret, appUrl } from "@/lib/bot";
 
 const bad = (error: string, status = 400) => NextResponse.json({ error }, { status });
 const ok = () => NextResponse.json({ ok: true });
-const MANAGER_KEYS = ["store_enabled", "lockers_enabled", "lockers_count"]; // zal egasi o'zgartira oladigan sozlamalar
+const MANAGER_KEYS = ["store_enabled", "lockers_enabled", "lockers_count", "coin_rate", "coin_per_visit", "tpl_remind", "tpl_absent"]; // zal egasi o'zgartira oladigan sozlamalar
 const SUPER_ONLY = ["connectBot", "disconnectBot", "setMenuButton", "backup", "restart"];
-const SETTING_KEYS = ["store_enabled", "theme", "season", "absent_days", "auto_block", "checkin_hours", "lockers_enabled", "lockers_count", "remind_on", "remind_days", "bot_welcome", "absent_msg_on", "absent_msg_days", "summary_on"];
+const SETTING_KEYS = ["store_enabled", "theme", "season", "absent_days", "auto_block", "checkin_hours", "lockers_enabled", "lockers_count", "remind_on", "remind_days", "bot_welcome", "absent_msg_on", "absent_msg_days", "summary_on", "coin_rate", "coin_per_visit", "tpl_remind", "tpl_absent"];
 
 export async function GET(req: Request) {
   const u = await getUser();
@@ -33,7 +35,7 @@ export async function GET(req: Request) {
   }
   await releaseExpired();
   const mstart = `${tzToday().slice(0, 8)}01T00:00:00+05:00`;
-  const [c, p, v, b, mv, mp, od, lk, ex] = await Promise.all([
+  const [c, p, v, b, mv, mp, od, lk, ex, pa, oa, sc] = await Promise.all([
     (u.role === "trainer"
       ? db.from("users").select("*").eq("role", "client").eq("trainer_id", u.id)
       : db.from("users").select("*").eq("role", "client")).order("created_at", { ascending: false }),
@@ -45,7 +47,15 @@ export async function GET(req: Request) {
     db.from("orders").select("id, total, items, created_at, users(first_name,last_name,phone)").order("created_at", { ascending: false }).limit(100),
     db.from("lockers").select("num, user_id, until, users(first_name,last_name)").order("num"),
     db.from("exercises").select("*").order("grp").order("title"),
+    db.from("payments").select("user_id, amount, gym_amount, trainer_amount, plan").limit(50000),
+    db.from("orders").select("user_id, total").limit(50000),
+    db.from("scheduled").select("*").order("send_at", { ascending: false }).limit(40),
   ]);
+  // Har bir mijozning umumiy hisobi: zal + trener + tanga to'ldirish + do'kon
+  const totals: Record<string, any> = {};
+  const T = (id: string) => (totals[id] = totals[id] || { gym: 0, trainer: 0, coins: 0, shop: 0 });
+  (pa.data || []).forEach((x: any) => { if (!x.user_id) return; const t = T(x.user_id); if (x.plan === "coins") t.coins += x.amount || 0; else { t.trainer += x.trainer_amount || 0; t.gym += x.gym_amount || Math.max(0, (x.amount || 0) - (x.trainer_amount || 0)); } });
+  (oa.data || []).forEach((x: any) => { if (x.user_id) T(x.user_id).shop += x.total || 0; });
   const hours = Array(24).fill(0);
   (mv.data || []).forEach((x: any) => { hours[new Date(+new Date(x.at) + 5 * 3600e3).getUTCHours()]++; });
   const monthVisits: Record<string, number> = {}, paidMonth: Record<string, number> = {};
@@ -56,15 +66,16 @@ export async function GET(req: Request) {
   const hide = u.role === "trainer"; // trener faqat o'z mijozlarini ko'radi, pul ma'lumotlarini emas
   const strip = (x: any) => { const { pass_hash, ...r } = x; return r; };
   return NextResponse.json({
-    staff: (stf.data || []).map(strip), clients: (c.data || []).map(strip), products: p.data || [], visits: v.data || [], botUsers: b.data || [], monthVisits, paidMonth: hide ? {} : paidMonth, income: hide ? 0 : income, orders: hide ? [] : od.data || [], lockers: lk.data || [], exercises: ex.data || [], hours, ownerTg: u.tg_id || null,
+    staff: (stf.data || []).map(strip), clients: (c.data || []).map(strip), products: p.data || [], visits: v.data || [], botUsers: b.data || [], monthVisits, paidMonth: hide ? {} : paidMonth, income: hide ? 0 : income, orders: hide ? [] : od.data || [], lockers: lk.data || [], exercises: ex.data || [], scheduled: sc.data || [], totals: hide ? {} : totals, hours, ownerTg: u.tg_id || null,
     displayUrl: u.role !== "trainer" && process.env.DISPLAY_KEY ? `${appUrl(req)}/display?key=${process.env.DISPLAY_KEY}` : null,
   });
 }
 
 export async function POST(req: Request) {
   const u = await getUser();
-  if (!u || !["owner", "manager"].includes(u.role)) return bad("Ruxsat yo'q", 403);
+  if (!u || u.role === "client") return bad("Ruxsat yo'q", 403);
   const b = await req.json();
+  if (u.role === "trainer" && b.action !== "assignExercises") return bad("Ruxsat yo'q", 403);
   if (u.role !== "owner" && SUPER_ONLY.includes(b.action)) return bad("Bu amal faqat super admin uchun", 403);
   const today = tzToday();
 
@@ -146,30 +157,35 @@ export async function POST(req: Request) {
       await recordExit(b.id);
       return ok();
     case "saveExercise": {
-      const row = { title: b.title, grp: b.grp || null, sets: +b.sets || null, reps: b.reps || null, note: b.note || null, image_url: b.image_url || null, active: b.active !== false };
+      const row: any = { title: b.title, grp: b.grp || null, sets: +b.sets || null, reps: b.reps || null, note: b.note || null, image_url: b.image_url || null, active: b.active !== false, muscles: Array.isArray(b.muscles) ? b.muscles : [], equipment: b.equipment || null, steps: b.steps || null, video_url: b.video_url || null };
       if (!row.title) return bad("Mashq nomi kerak");
-      const r = b.id ? await db.from("exercises").update(row).eq("id", b.id) : await db.from("exercises").insert(row);
+      let r = b.id ? await db.from("exercises").update(row).eq("id", b.id) : await db.from("exercises").insert(row);
+      if (r.error) { // migration_v6 hali ishga tushmagan bo'lsa ham asosiy maydonlar saqlansin
+        const { muscles, equipment, steps, video_url, ...base } = row;
+        r = b.id ? await db.from("exercises").update(base).eq("id", b.id) : await db.from("exercises").insert(base);
+      }
       return r.error ? bad(r.error.message) : ok();
     }
     case "delExercise":
       await db.from("exercises").delete().eq("id", b.id);
       return ok();
     case "seedExercises": {
-      const E = [
-        ["Yotib shtanga siqish", "Ko'krak", 4, "8-10", "Yelka kuraklarini jipslang, shtangani ko'krak o'rtasigacha tushiring."],
-        ["Gantel bilan yotib siqish", "Ko'krak", 3, "10-12", "Gantellarni yuqorida birlashtirmasdan, sekin tushiring."],
-        ["Turnikda tortilish", "Orqa", 4, "6-10", "Tirsaklarni tanaga tomon torting, tanani tebratmang."],
-        ["Shtanga bilan tortish", "Orqa", 4, "10", "Orqani to'g'ri ushlab, shtangani qoringa tortib keling."],
-        ["Squat", "Oyoq", 4, "10-12", "Tizzalar oyoq uchi bilan bir yo'nalishda, orqa to'g'ri."],
-        ["Oyoq pressi", "Oyoq", 4, "12", "Tizzani to'liq yozib qo'ymang, yuklamani nazorat qiling."],
-        ["Yelka pressi", "Yelka", 4, "10", "Gantelni bosh ustiga ko'taring, belni egmang."],
-        ["Yon tomonga gantel ko'tarish", "Yelka", 3, "15", "Yengil vazn bilan, yelka balandligigacha ko'taring."],
-        ["Biceps gantel bilan", "Qo'l", 3, "12", "Tirsaklar qimirlamasin, sekin tushiring."],
-        ["Triceps blokda", "Qo'l", 3, "12", "Tirsaklar tanaga yopishgan holda pastga torting."],
-        ["Plank", "Press", 3, "45 soniya", "Tana to'g'ri chiziqda, qorin tarang."],
-        ["Yugurish yo'lakchasi", "Kardio", 1, "20 daqiqa", "Qadamni o'rtacha tezlikda boshlang, oxirida sekinlashtiring."],
-      ].map(([title, grp, sets, reps, note]) => ({ title, grp, sets, reps, note }));
-      const r = await db.from("exercises").insert(E);
+      const E: any[] = [
+        ["Yotib shtanga siqish", "Ko'krak", 4, "8-10", ["chest", "shoulders", "triceps"], "Shtanga, skameyka", "Skameykaga yoting, yelka kuraklarini jipslang.\nShtangani yelka kengligidan sal kengroq ushlang.\nShtangani ko'krak o'rtasigacha sekin tushiring.\nNafas chiqarib, yuqoriga itaring."],
+        ["Gantel bilan yotib siqish", "Ko'krak", 3, "10-12", ["chest", "shoulders", "triceps"], "Gantellar, skameyka", "Skameykada yotib, gantellarni ko'krak ustida ushlang.\nTirsaklarni yon tomonga ochib, sekin tushiring.\nGantellarni yuqoriga siqib qaytaring."],
+        ["Turnikda tortilish", "Orqa", 4, "6-10", ["lats", "biceps", "forearms"], "Turnik", "Turnikni yelkadan kengroq ushlang.\nTanani tebratmasdan yuqoriga torting.\nVoronkani turnikka tegizing, sekin tushing."],
+        ["Shtanga bilan tortish", "Orqa", 4, "10", ["lats", "traps", "biceps", "lowback"], "Shtanga", "Oyoqlarni yelka kengligida qo'ying, tanani oldinga egib turing.\nShtangani qoringa tomon torting.\nOrqani to'g'ri ushlang, sekin tushiring."],
+        ["Squat", "Oyoq", 4, "10-12", ["quads", "glutes", "hamstrings"], "Shtanga yoki o'z vazni", "Oyoqlarni yelka kengligida qo'ying.\nO'tirganday pastga tushing, tizzalar oyoq uchidan o'tmasin.\nTovon bilan itarib, tik turing."],
+        ["Oyoq pressi", "Oyoq", 4, "12", ["quads", "glutes"], "Oyoq press trenajyori", "Orqangizni o'rindiqqa tekis qo'ying.\nPlatformani tizzalar 90 daraja bo'lguncha tushiring.\nTizzani to'liq yozmasdan itaring."],
+        ["Yelka pressi", "Yelka", 4, "10", ["shoulders", "triceps", "traps"], "Gantellar", "Gantellarni yelka balandligida ushlang.\nBosh ustiga siqib ko'taring.\nSekin pastga tushiring, belni egmang."],
+        ["Yon tomonga gantel ko'tarish", "Yelka", 3, "15", ["shoulders"], "Yengil gantellar", "Gantellarni yon tomonda ushlang.\nTirsakni sal bukib, yelka balandligigacha ko'taring.\nSekin tushiring."],
+        ["Biceps gantel bilan", "Qo'l", 3, "12", ["biceps", "forearms"], "Gantellar", "Tirsaklarni tanaga yopishtiring.\nGantelni yelkaga qarab buking.\nSekin tushiring."],
+        ["Triceps blokda", "Qo'l", 3, "12", ["triceps"], "Blok trenajyor", "Tirsaklar tanaga yopishgan holda turing.\nDastani pastga to'liq yozing.\nSekin yuqoriga qaytaring."],
+        ["Plank", "Press", 3, "45 soniya", ["abs", "lowback", "shoulders"], "Gilamcha", "Tirsaklarga tayanib, tanani to'g'ri chiziqda ushlang.\nQorinni tarang qiling.\nBelni bukmang, nafas oling."],
+        ["Yugurish yo'lakchasi", "Kardio", 1, "20 daqiqa", ["quads", "calves", "hamstrings"], "Yugurish yo'lakchasi", "O'rtacha tezlikda boshlang.\nQadamni bir tekis ushlang.\nOxirida sekinlashtirib to'xtang."],
+      ].map(([title, grp, sets, reps, muscles, equipment, steps]) => ({ title, grp, sets, reps, muscles, equipment, steps }));
+      let r = await db.from("exercises").insert(E);
+      if (r.error) r = await db.from("exercises").insert(E.map(({ muscles, equipment, steps, ...x }) => ({ ...x, note: String(steps).split("\n")[0] })));
       return r.error ? bad(r.error.message) : ok();
     }
     case "backup": {
@@ -279,30 +295,49 @@ export async function POST(req: Request) {
     }
     case "notify": {
       if (!b.title) return bad("Sarlavha kerak");
-      const { data: cl } = await db.from("users").select("id,tg_id,paid_until,silent,plan,trainer,checked_in_until").eq("role", "client");
-      const all = cl || [];
-      const nowT = Date.now();
-      const pick: Record<string, (x: any) => boolean> = {
-        all: () => true, botall: () => true,
-        unpaid: (x) => !x.paid_until || x.paid_until < today,
-        active: (x) => !!x.paid_until && x.paid_until >= today,
-        premium: (x) => x.plan === "premium",
-        trainer: (x) => !!x.trainer,
-        ingym: (x) => !!x.checked_in_until && +new Date(x.checked_in_until) > nowT,
-      };
-      const list = pick[b.target] ? all.filter(pick[b.target]) : all.filter((x: any) => x.id === b.target);
-      const global = b.target === "all" || b.target === "botall";
-      const rows = global ? [{ user_id: null, title: b.title, body: b.body || "" }] : list.map((x: any) => ({ user_id: x.id, title: b.title, body: b.body || "" }));
-      if (rows.length) await db.from("notifications").insert(rows);
-      const ids = new Set<number>(list.filter((x: any) => x.tg_id).map((x: any) => Number(x.tg_id)));
-      if (b.target === "botall") (await db.from("bot_users").select("tg_id").eq("blocked", false)).data?.forEach((x: any) => ids.add(Number(x.tg_id)));
-      const silent = new Map(all.map((x: any) => [Number(x.tg_id), !!x.silent]));
-      const targets = [...ids];
-      for (let i = 0; i < targets.length; i += 25)
-        await Promise.allSettled(targets.slice(i, i + 25).map((id) => tg("sendMessage", {
-          chat_id: id, text: `🔔 ${b.title}\n${b.body || ""}`, disable_notification: !!b.silent || !!silent.get(id),
-        })));
-      return NextResponse.json({ ok: true, sent: targets.length });
+      return NextResponse.json({ ok: true, sent: await broadcast(b) });
+    }
+    case "saveScheduled": {
+      if (!b.title || !b.send_at) return bad("Sarlavha va vaqt kerak");
+      const at = new Date(b.send_at);
+      if (isNaN(+at)) return bad("Vaqt noto'g'ri");
+      const r = await db.from("scheduled").insert({ title: b.title, body: b.body || "", target: b.target || "all", send_at: at.toISOString(), repeat: ["daily", "weekly"].includes(b.repeat) ? b.repeat : "none", silent: !!b.silent });
+      return r.error ? bad(r.error.message.includes("scheduled") ? "Avval migration_v6.sql ni ishga tushiring" : r.error.message) : ok();
+    }
+    case "delScheduled":
+      await db.from("scheduled").delete().eq("id", b.id);
+      return ok();
+    case "topup": {
+      // Mijoz naqd pul beradi, zal egasi shu summaga yarasha tanga soladi
+      const rate = Math.max(1, +(await db.from("settings").select("value").eq("key", "coin_rate").maybeSingle()).data?.value || 1000);
+      const cash = Math.max(0, Math.floor(+b.cash || 0));
+      const coins = Math.floor(+b.coins || 0) || Math.floor(cash / rate);
+      if (!coins) return bad("Summa yoki tanga sonini kiriting");
+      const { data: c } = await db.from("users").select("coins,tg_id,silent,first_name").eq("id", b.id).eq("role", "client").single();
+      if (!c) return bad("Mijoz topilmadi");
+      const r = await db.from("users").update({ coins: Math.max(0, (c.coins || 0) + coins) }).eq("id", b.id);
+      if (r.error) return bad("Avval migration_v6.sql ni ishga tushiring");
+      await db.from("coin_log").insert({ user_id: b.id, delta: coins, reason: cash ? `Naqd to'lov: ${cash} so'm` : "Bonus", cash });
+      if (cash) await db.from("payments").insert({ user_id: b.id, amount: cash, days: 0, plan: "coins" });
+      const text = `Hisobingizga ${coins} tanga qo'shildi. Balans: ${(c.coins || 0) + coins}. Do'kondan mahsulot olishda ishlating.`;
+      await db.from("notifications").insert({ user_id: b.id, title: "Tanga qo'shildi", body: text });
+      if (c.tg_id) await tgCall("sendMessage", { chat_id: c.tg_id, text: `🪙 ${text}`, disable_notification: !!c.silent });
+      return NextResponse.json({ ok: true, coins });
+    }
+    case "assignExercises": {
+      // Zal egasi yoki trener tanlangan mashqlarni mijozga yuboradi (trener faqat o'z mijoziga)
+      const ids = Array.isArray(b.exercise_ids) ? b.exercise_ids : [];
+      if (!b.user_id || !ids.length) return bad("Mijoz va mashqlarni tanlang");
+      const { data: c } = await db.from("users").select("id,tg_id,silent,trainer_id,first_name").eq("id", b.user_id).eq("role", "client").single();
+      if (!c) return bad("Mijoz topilmadi");
+      if (u.role === "trainer" && c.trainer_id !== u.id) return bad("Bu mijoz sizga biriktirilmagan", 403);
+      const r = await db.from("assignments").insert(ids.map((exercise_id: string) => ({ user_id: c.id, exercise_id, by_id: u.id, note: b.note || null })));
+      if (r.error) return bad(r.error.message.includes("assignments") ? "Avval migration_v6.sql ni ishga tushiring" : r.error.message);
+      const who = [u.first_name, u.last_name].filter(Boolean).join(" ") || "Trener";
+      const text = `${who} sizga ${ids.length} ta mashq yubordi.${b.note ? "\n" + b.note : ""}\nIlovada Mashqlar bo'limini oching.`;
+      await db.from("notifications").insert({ user_id: c.id, title: "Yangi mashqlar dasturi", body: text });
+      if (c.tg_id) await tgCall("sendMessage", { chat_id: c.tg_id, text: `💪 ${text}`, disable_notification: !!c.silent });
+      return ok();
     }
   }
   return bad("Noma'lum amal");
